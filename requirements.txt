@@ -1,0 +1,22 @@
+# 牛头王 6 Nimmt! 依赖清单
+#
+# 安装命令：
+#   pip install -r requirements.txt
+#
+# ──────────────────────────────────────────
+# 网页版 (interactive/nimmt.html)
+#   无任何 Python 依赖，浏览器直接打开即可
+#
+# 命令行版 + Q-Learning (interactive/nimmt.py, ql/nimmt_ql.py)
+#   仅需 Python 3.8+ 标准库，无需安装额外包
+#
+# DQN / PPO / Arena / Compare
+#   需要以下第三方库：
+# ──────────────────────────────────────────
+
+# 深度学习框架（DQN / PPO 必需）
+torch>=2.0.0
+
+# 数值计算（状态向量编码）
+numpy>=1.24.0
+
