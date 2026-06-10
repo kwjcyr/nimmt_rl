@@ -32,7 +32,8 @@ HAND_SIZE   = 10
 END_SCORE   = 66
 NUM_PLAYERS = 6
 
-MODEL_PATH  = "nimmt_dqn_model.pth"
+_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH  = os.path.join(_DIR, "nimmt_dqn_model.pth")
 AI_STRATEGIES = ["greedy", "safe", "greedy", "random", "safe"]
 
 

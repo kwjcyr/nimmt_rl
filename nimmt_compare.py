@@ -197,6 +197,7 @@ def train_and_eval_dqn(train_eps=30000, eval_eps=3000):
         dqn.run_episode(agent, training=True)
 
     print(f"   训练耗时: {time.time()-t0:.1f}s")
+    agent.save(os.path.join(os.path.dirname(os.path.abspath(__file__)), "nimmt_dqn_model.pth"))
 
     def dqn_action(hand, rows, score):
         return agent.get_action(hand, rows, score, training=False)
@@ -224,6 +225,7 @@ def train_and_eval_ppo(train_eps=30000, eval_eps=3000):
             agent.update()
 
     print(f"   训练耗时: {time.time()-t0:.1f}s")
+    agent.save(os.path.join(os.path.dirname(os.path.abspath(__file__)), "nimmt_ppo_model.pth"))
 
     def ppo_action(hand, rows, score):
         return agent.get_action_eval(hand, rows, score)
