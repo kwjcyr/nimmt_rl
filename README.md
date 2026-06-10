@@ -162,14 +162,17 @@ python3 test/test_model.py
 
 | MDP 要素 | 牛头王中的对应 |
 |---------|-------------|
-| 状态 $s$ | 手牌 + 牌桌 5 列 + 当前累计罚分 |
-| 动作 $a$ | 从手牌中选第 $i$ 张出（$i \in \{0,\ldots,n{-}1\}$） |
-| 奖励 $r$ | $-$本轮获得牛头数；终局排名奖励 $\{+8,+4,+1,-2,-5,-8\}$ |
-| 转移 $P$ | 其他玩家的出牌随机性决定下一局面 |
+| 状态 s | 手牌 + 牌桌 5 列 + 当前累计罚分 |
+| 动作 a | 从手牌中选第 i 张出（i ∈ {0, …, n-1}） |
+| 奖励 r | -本轮获得牛头数；终局排名奖励 {+8,+4,+1,-2,-5,-8} |
+| 转移 P | 其他玩家的出牌随机性决定下一局面 |
 
-目标：找到策略 $\pi(a|s)$ 使期望累计回报最大：
+目标：找到策略 π(a|s) 使期望累计回报最大：
 
-$$G_t = \sum_{k=0}^{\infty} \gamma^k r_{t+k+1}$$
+```
+G_t = r_(t+1) + γ·r_(t+2) + γ²·r_(t+3) + ...
+    = Σ γ^k · r_(t+k+1)   (k = 0, 1, 2, ...)
+```
 
 ---
 
@@ -177,25 +180,34 @@ $$G_t = \sum_{k=0}^{\infty} \gamma^k r_{t+k+1}$$
 
 #### 核心思想
 
-用一张**哈希表**存储所有状态-动作对的 Q 值 $Q(s,a)$，代表"在状态 $s$ 下执行动作 $a$ 的期望回报"。
+用一张**哈希表**存储所有状态-动作对的 Q 值 Q(s,a)，代表"在状态 s 下执行动作 a 的期望回报"。
 
 #### Bellman 最优方程
 
-$$Q^*(s,a) = \mathbb{E}\left[r + \gamma \max_{a'} Q^*(s', a')\right]$$
+```
+Q*(s,a) = E[ r + γ · max_a' Q*(s', a') ]
+```
 
 #### 更新规则（TD 目标）
 
-$$Q(s,a) \leftarrow Q(s,a) + \alpha \left[\underbrace{r + \gamma \max_{a'} Q(s',a')}_{\text{TD 目标}} - Q(s,a)\right]$$
+```
+Q(s,a) ← Q(s,a) + α · [ r + γ · max_a' Q(s',a')  -  Q(s,a) ]
+                          └──────── TD 目标 ────────┘
+```
 
 | 符号 | 含义 | 本项目取值 |
 |------|------|---------|
-| $\alpha$ | 学习率，控制每步更新幅度 | 0.1 |
-| $\gamma$ | 折扣因子，未来奖励权重 | 0.95 |
-| $\varepsilon$ | 探索率，随训练从 1.0 衰减到 0.05 | 0.9995/局衰减 |
+| α (alpha) | 学习率，控制每步更新幅度 | 0.1 |
+| γ (gamma) | 折扣因子，未来奖励权重 | 0.95 |
+| ε (epsilon) | 探索率，随训练从 1.0 衰减到 0.05 | 0.9995/局衰减 |
 
 #### 探索策略（ε-greedy）
 
-$$a = \begin{cases} \text{随机动作} & \text{以概率 } \varepsilon \\ \arg\max_{a} Q(s,a) & \text{以概率 } 1-\varepsilon \end{cases}$$
+```
+       ┌ 随机动作              以概率 ε
+a  =   │
+       └ argmax_a Q(s,a)      以概率 1-ε
+```
 
 #### 状态编码（6 维离散特征）
 
@@ -214,33 +226,46 @@ $$a = \begin{cases} \text{随机动作} & \text{以概率 } \varepsilon \\ \arg\
 
 #### 核心思想
 
-Q-Learning 的状态空间离散化会丢失精度，DQN 用**神经网络** $Q_\theta(s,a)$ 来近似 Q 函数，可直接输入连续状态向量。
+Q-Learning 的状态空间离散化会丢失精度，DQN 用**神经网络** Q_θ(s,a) 来近似 Q 函数，可直接输入连续状态向量。
 
 #### 状态向量（36 维）
 
-$$s = \bigl[\underbrace{c_1/100,\ b_1/7,\ \ldots,\ c_{10}/100,\ b_{10}/7}_{20\text{维手牌}},\ \underbrace{t_1/100,\ l_1/6,\ h_1/35,\ \ldots}_{15\text{维牌桌}},\ \underbrace{\text{score}/66}_{1\text{维}}\bigr]$$
+```
+s = [ c1/100, b1/7, c2/100, b2/7, ..., c10/100, b10/7,   ← 20维手牌
+      t1/100, l1/6, h1/35, t2/100, l2/6, h2/35, ...,     ← 15维牌桌
+      score/66 ]                                           ← 1维得分
 
-其中 $c_i$ 为第 $i$ 张手牌，$b_i$ 为其牛头数，$t_j/l_j/h_j$ 分别为第 $j$ 列末尾牌、已有张数、列牛头数。
+其中 ci = 第i张手牌牌面，bi = 其牛头数
+     tj = 第j列末尾牌，lj = 已有张数，hj = 列牛头数
+```
 
 #### 网络结构
 
-$$s \xrightarrow{\text{Linear}(36\to128)} \text{ReLU} \xrightarrow{\text{Linear}(128\to128)} \text{ReLU} \xrightarrow{\text{Linear}(128\to64)} \text{ReLU} \xrightarrow{\text{Linear}(64\to10)} Q(s,\cdot)$$
+```
+s(36维) → Linear(36→128) → ReLU
+        → Linear(128→128) → ReLU
+        → Linear(128→64)  → ReLU
+        → Linear(64→10)   → Q(s, ·)   ← 每张手牌对应一个 Q 值
+```
 
 #### 损失函数
 
-$$\mathcal{L}(\theta) = \mathbb{E}_{(s,a,r,s')\sim\mathcal{D}}\left[\left(r + \gamma \max_{a'} Q_{\bar\theta}(s',a') - Q_\theta(s,a)\right)^2\right]$$
+```
+L(θ) = E[ ( r + γ · max_a' Q_θ'(s',a')  -  Q_θ(s,a) )² ]
+              └──────── TD 目标（用 Target Network θ' 计算）────┘
+```
 
-其中 $\bar\theta$ 为 **Target Network** 的参数，每 200 步从 $\theta$ 复制一次，防止目标值随训练漂移造成不稳定。
+其中 θ'（Target Network）每 200 步从 θ 复制一次，防止目标值随训练漂移造成不稳定。
 
 #### Experience Replay
 
-每步将 $(s, a, r, s', \text{done})$ 存入容量为 20000 的循环缓冲区 $\mathcal{D}$，每次从中**随机采样** batch=64 条进行梯度更新，打破时序相关性。
+每步将 (s, a, r, s', done) 存入容量为 20000 的循环缓冲区，每次从中**随机采样** batch=64 条进行梯度更新，打破时序相关性。
 
 | 参数 | 取值 |
 |------|------|
 | 网络结构 | 36 → 128 → 128 → 64 → 10 |
 | 学习率 | 1e-3 (Adam) |
-| $\gamma$ | 0.95 |
+| γ (gamma) | 0.95 |
 | Replay Buffer | 20000 |
 | Batch Size | 64 |
 | Target Network 更新频率 | 每 200 步 |
@@ -252,7 +277,7 @@ $$\mathcal{L}(\theta) = \mathbb{E}_{(s,a,r,s')\sim\mathcal{D}}\left[\left(r + \g
 
 #### 核心思想
 
-Q-Learning / DQN 属于**值函数**方法（学 Q 值再推导策略）。PPO 是**策略梯度**方法，直接对策略 $\pi_\theta(a|s)$ 求梯度，通过 Actor-Critic 架构同时学策略和价值函数。
+Q-Learning / DQN 属于**值函数**方法（学 Q 值再推导策略）。PPO 是**策略梯度**方法，直接对策略 π_θ(a|s) 求梯度，通过 Actor-Critic 架构同时学策略和价值函数。
 
 #### Actor-Critic 架构
 
@@ -261,56 +286,68 @@ Q-Learning / DQN 属于**值函数**方法（学 Q 值再推导策略）。PPO �
     │
     ├─ 共享主干: Linear(36→128) → Tanh → Linear(128→128) → Tanh
     │
-    ├─ Actor Head: Linear(128→10) → softmax → 动作概率分布 π(a|s)
-    └─ Critic Head: Linear(128→1) → 状态价值 V(s)
+    ├─ Actor Head:  Linear(128→10) → softmax → 动作概率分布 π(a|s)
+    └─ Critic Head: Linear(128→1)            → 状态价值 V(s)
 ```
 
 #### 策略梯度目标
 
 原始策略梯度（REINFORCE）：
 
-$$\nabla_\theta J(\theta) = \mathbb{E}_{\pi_\theta}\left[\nabla_\theta \log \pi_\theta(a|s) \cdot A(s,a)\right]$$
+```
+∇_θ J(θ) = E[ ∇_θ log π_θ(a|s) · A(s,a) ]
 
-其中优势函数 $A(s,a) = Q(s,a) - V(s)$ 衡量"该动作比平均水平好多少"。
+其中优势函数 A(s,a) = Q(s,a) - V(s)，衡量"该动作比平均水平好多少"
+```
 
 #### GAE（Generalized Advantage Estimation）
 
-直接用 $r - V(s)$ 估计优势方差很大。GAE 用 TD 残差的指数加权平均来降低方差：
+直接用 r - V(s) 估计优势方差很大。GAE 用 TD 残差的指数加权平均来降低方差：
 
-$$\delta_t = r_t + \gamma V(s_{t+1}) - V(s_t)$$
+```
+δ_t  = r_t + γ · V(s_{t+1}) - V(s_t)        ← TD 残差
 
-$$\hat{A}_t = \sum_{l=0}^{\infty} (\gamma\lambda)^l \delta_{t+l}$$
+A_t  = δ_t + (γλ)·δ_{t+1} + (γλ)²·δ_{t+2} + ...
+     = Σ (γλ)^l · δ_{t+l}   (l = 0, 1, 2, ...)
+```
 
-| $\lambda$ 取值 | 效果 |
-|--------------|------|
-| $\lambda=0$ | 纯 TD，低方差高偏差 |
-| $\lambda=1$ | 纯 MC，低偏差高方差 |
-| **本项目 $\lambda=0.95$** | **平衡偏差与方差** |
+| λ 取值 | 效果 |
+|--------|------|
+| λ = 0 | 纯 TD，低方差高偏差 |
+| λ = 1 | 纯 MC，低偏差高方差 |
+| **本项目 λ = 0.95** | **平衡偏差与方差** |
 
 #### PPO Clipped Objective
 
-朴素策略梯度每次更新后策略可能变化过大导致训练崩溃。PPO 引入重要性采样比率 $r_t(\theta) = \dfrac{\pi_\theta(a_t|s_t)}{\pi_{\theta_\text{old}}(a_t|s_t)}$，并对其裁剪：
+朴素策略梯度每次更新后策略可能变化过大导致训练崩溃。PPO 引入重要性采样比率并对其裁剪：
 
-$$\mathcal{L}^{\text{CLIP}}(\theta) = \mathbb{E}_t\left[\min\left(r_t(\theta)\hat{A}_t,\ \text{clip}(r_t(\theta),\ 1-\varepsilon,\ 1+\varepsilon)\hat{A}_t\right)\right]$$
+```
+r_t(θ) = π_θ(a_t|s_t) / π_θ_old(a_t|s_t)       ← 新旧策略概率比
 
-其中 $\varepsilon=0.2$ 限制每次更新幅度，防止策略步子迈太大。
+L_CLIP(θ) = E[ min( r_t(θ)·A_t,
+                    clip(r_t(θ), 1-ε, 1+ε)·A_t ) ]
+```
+
+其中 ε = 0.2，将概率比限制在 [0.8, 1.2] 区间内，防止策略步子迈太大。
 
 #### 完整损失函数
 
-$$\mathcal{L}(\theta) = -\mathcal{L}^{\text{CLIP}} + c_1 \mathcal{L}^{\text{VF}} - c_2 \mathcal{H}[\pi_\theta]$$
+```
+L(θ) = -L_CLIP(θ)                   ← 策略目标（取负做梯度上升）
+      + c1 · L_VF(θ)                 ← Critic 损失，c1 = 0.5
+      - c2 · H[π_θ]                  ← 熵正则化（鼓励探索），c2 = 0.01
 
-| 项 | 含义 | 系数 |
-|----|------|------|
-| $\mathcal{L}^{\text{CLIP}}$ | 策略提升目标（取负因为做梯度上升） | — |
-| $\mathcal{L}^{\text{VF}} = (V_\theta(s) - V^\text{target})^2$ | Critic 均方误差 | $c_1=0.5$ |
-| $\mathcal{H}[\pi_\theta] = -\sum_a \pi\log\pi$ | 策略熵，鼓励探索 | $c_2=0.01$ |
+其中：
+  L_VF  = ( V_θ(s) - V_target )²
+  H[π]  = -Σ_a π(a|s) · log π(a|s)
+```
 
 #### 训练流程
 
 ```
 每 10 局收集轨迹数据
     │
-    ├─ 计算 GAE 优势 Â 和回报目标 V_target
+    ├─ 计算 GAE 优势 A_t 和回报目标 V_target
     │
     └─ 重复 4 轮（PPO epochs）:
          随机打乱数据 → 按 batch=64 更新网络
@@ -320,11 +357,11 @@ $$\mathcal{L}(\theta) = -\mathcal{L}^{\text{CLIP}} + c_1 \mathcal{L}^{\text{VF}}
 | 参数 | 取值 |
 |------|------|
 | 学习率 | 3e-4 (Adam) |
-| $\gamma$ | 0.95 |
-| GAE $\lambda$ | 0.95 |
-| Clip $\varepsilon$ | 0.2 |
-| Critic 系数 $c_1$ | 0.5 |
-| 熵系数 $c_2$ | 0.01 |
+| γ (gamma) | 0.95 |
+| GAE λ (lambda) | 0.95 |
+| Clip ε (epsilon) | 0.2 |
+| Critic 系数 c1 | 0.5 |
+| 熵系数 c2 | 0.01 |
 | PPO epochs | 4 |
 | 轨迹收集频率 | 每 10 局 |
 
