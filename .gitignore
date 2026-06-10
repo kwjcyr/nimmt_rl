@@ -3,3 +3,6 @@ __pycache__/
 *.pyo
 .DS_Store
 
+# 训练好的模型文件（体积大，用户本地训练生成）
+models/
+
