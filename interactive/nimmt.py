@@ -78,10 +78,11 @@ class NimmtGame:
         for i in range(self.num_players):
             self.hands[i] = sorted(deck[i * self.HAND_SIZE: (i + 1) * self.HAND_SIZE])
 
-        # 牌桌每列放1张作为初始牌
+        # 牌桌每列放1张作为初始牌（按升序排列，小的在列1，大的在列5）
         start_idx = self.num_players * self.HAND_SIZE
+        base_cards = sorted(deck[start_idx:start_idx + self.NUM_ROWS])
         for r in range(self.NUM_ROWS):
-            self.rows[r] = [deck[start_idx + r]]
+            self.rows[r] = [base_cards[r]]
 
     def get_bull_total(self, cards: list) -> int:
         """计算一组牌的总牛头数"""
