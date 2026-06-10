@@ -14,8 +14,12 @@ import random
 import sys
 import time
 
-# 把当前目录加入 PATH，方便 import
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 把 ql / dqn / ppo 目录加入 PATH，方便 import
+_INTERACTIVE_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR        = os.path.dirname(_INTERACTIVE_DIR)
+_MODELS_DIR      = os.path.join(_ROOT_DIR, "models")
+for _sub in ("ql", "dqn", "ppo"):
+    sys.path.insert(0, os.path.join(_ROOT_DIR, _sub))
 
 # =========================================================
 #  共享游戏逻辑（与三个 RL 文件保持一致）
@@ -197,7 +201,7 @@ def train_and_eval_dqn(train_eps=30000, eval_eps=3000):
         dqn.run_episode(agent, training=True)
 
     print(f"   训练耗时: {time.time()-t0:.1f}s")
-    agent.save(os.path.join(os.path.dirname(os.path.abspath(__file__)), "nimmt_dqn_model.pth"))
+    agent.save(os.path.join(_MODELS_DIR, "nimmt_dqn_model.pth"))
 
     def dqn_action(hand, rows, score):
         return agent.get_action(hand, rows, score, training=False)
@@ -225,7 +229,7 @@ def train_and_eval_ppo(train_eps=30000, eval_eps=3000):
             agent.update()
 
     print(f"   训练耗时: {time.time()-t0:.1f}s")
-    agent.save(os.path.join(os.path.dirname(os.path.abspath(__file__)), "nimmt_ppo_model.pth"))
+    agent.save(os.path.join(_MODELS_DIR, "nimmt_ppo_model.pth"))
 
     def ppo_action(hand, rows, score):
         return agent.get_action_eval(hand, rows, score)

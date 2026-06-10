@@ -36,8 +36,9 @@ HAND_SIZE   = 10
 END_SCORE   = 66
 NUM_PLAYERS = 6
 
-_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH  = os.path.join(_DIR, "nimmt_q_table.pkl")
+_DIR        = os.path.dirname(os.path.abspath(__file__))
+_MODELS_DIR = os.path.join(_DIR, "..", "models")
+MODEL_PATH  = os.path.join(_MODELS_DIR, "nimmt_q_table.pkl")
 
 
 def get_bulls(card: int) -> int:

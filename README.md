@@ -4,20 +4,30 @@
 
 ---
 
-## 📁 文件说明
+## 📁 项目结构
 
-| 文件 | 说明 |
-|------|------|
-| `nimmt.html` | **网页版**（推荐），单文件，浏览器直接打开即玩 |
-| `nimmt.py` | 命令行对战版（1人类 + 5 AI） |
-| `nimmt_ql.py` | Q-Learning 强化学习训练 + 对战 |
-| `nimmt_dqn.py` | DQN（深度 Q 网络）强化学习训练 + 对战 |
-| `nimmt_ppo.py` | PPO（近端策略优化）强化学习训练 + 对战 |
-| `nimmt_arena.py` | **Arena 对战**：真人 vs PPO vs DQN vs QL vs 2×规则AI |
-| `nimmt_compare.py` | 三种 RL 策略一键训练 + 胜率对比 |
-| `nimmt_q_table.pkl` | 训练好的 Q 表 |
-| `nimmt_dqn_model.pth` | 训练好的 DQN 模型 |
-| `nimmt_ppo_model.pth` | 训练好的 PPO 模型 |
+```
+nimmt/
+├── ql/
+│   └── nimmt_ql.py          # Q-Learning 强化学习训练 + 对战
+├── dqn/
+│   └── nimmt_dqn.py         # DQN（深度 Q 网络）训练 + 对战
+├── ppo/
+│   └── nimmt_ppo.py         # PPO（近端策略优化）训练 + 对战
+├── interactive/
+│   ├── nimmt.html           # 网页版（推荐，浏览器直接打开）
+│   ├── nimmt.py             # 命令行版（1人类 + 5 规则AI）
+│   ├── nimmt_arena.py       # Arena 对战：真人 vs PPO/DQN/QL/规则AI
+│   └── nimmt_compare.py     # 三种 RL 一键训练 + 胜率对比
+├── models/
+│   ├── nimmt_q_table.pkl    # 训练好的 Q 表
+│   ├── nimmt_dqn_model.pth  # 训练好的 DQN 模型
+│   └── nimmt_ppo_model.pth  # 训练好的 PPO 模型
+├── test/
+│   └── test_model.py        # 模型加载验证脚本
+├── requirements.txt         # Python 依赖
+└── README.md
+```
 
 ---
 
@@ -56,22 +66,30 @@
 
 ### 方式一：网页版（最简单，推荐发给朋友）
 
-直接双击打开 `nimmt.html`，或右键用浏览器打开。**无需安装任何东西！**
+直接双击打开 `interactive/nimmt.html`，或右键用浏览器打开。**无需安装任何东西！**
 
 ---
 
-### 方式二：命令行版（1人类 + 5 规则AI）
+### 方式二：安装依赖（DQN / PPO / Arena 需要）
 
 ```bash
-python3 nimmt.py
+pip install -r requirements.txt
 ```
 
 ---
 
-### 方式三：Arena 对战（真人 vs 三种 RL + 2 规则AI）
+### 方式三：命令行版（1人类 + 5 规则AI）
 
 ```bash
-python3 nimmt_arena.py
+python3 interactive/nimmt.py
+```
+
+---
+
+### 方式四：Arena 对战（真人 vs 三种 RL + 2 规则AI）
+
+```bash
+python3 interactive/nimmt_arena.py
 ```
 
 玩家配置：
@@ -88,34 +106,40 @@ python3 nimmt_arena.py
 如果没有训练过模型，可以先一键训练：
 
 ```bash
-python3 nimmt_arena.py train   # 先训练三种模型再进入对战
+python3 interactive/nimmt_arena.py train   # 先训练三种模型再进入对战
 ```
 
 ---
 
-### 方式四：RL 单独训练 / 对战
+### 方式五：RL 单独训练 / 对战
 
 ```bash
 # Q-Learning
-python3 nimmt_ql.py train   # 训练，保存 nimmt_q_table.pkl
-python3 nimmt_ql.py play    # 用模型对战展示
-python3 nimmt_ql.py         # 先训练再展示
+python3 ql/nimmt_ql.py train   # 训练，保存 models/nimmt_q_table.pkl
+python3 ql/nimmt_ql.py play    # 用模型对战展示
+python3 ql/nimmt_ql.py         # 先训练再展示
 
 # DQN
-python3 nimmt_dqn.py train  # 保存 nimmt_dqn_model.pth
-python3 nimmt_dqn.py play
-python3 nimmt_dqn.py
+python3 dqn/nimmt_dqn.py train  # 保存 models/nimmt_dqn_model.pth
+python3 dqn/nimmt_dqn.py play
+python3 dqn/nimmt_dqn.py
 
 # PPO
-python3 nimmt_ppo.py train  # 保存 nimmt_ppo_model.pth
-python3 nimmt_ppo.py play
-python3 nimmt_ppo.py
+python3 ppo/nimmt_ppo.py train  # 保存 models/nimmt_ppo_model.pth
+python3 ppo/nimmt_ppo.py play
+python3 ppo/nimmt_ppo.py
 ```
 
-### 方式五：三种算法一键对比
+### 方式六：三种算法一键对比
 
 ```bash
-python3 nimmt_compare.py
+python3 interactive/nimmt_compare.py
+```
+
+### 方式七：模型加载验证
+
+```bash
+python3 test/test_model.py
 ```
 
 ---
@@ -326,16 +350,15 @@ $$\mathcal{L}(\theta) = -\mathcal{L}^{\text{CLIP}} + c_1 \mathcal{L}^{\text{VF}}
 
 ## 📦 依赖
 
-### 网页版
-无任何依赖，浏览器直接打开 `nimmt.html`。
-
-### 命令行 / Q-Learning 版
-仅需 Python 3.6+，**无需额外安装**。
-
-### DQN / PPO / Arena 版
 ```bash
-pip3 install torch numpy
+pip install -r requirements.txt
 ```
+
+| 模块 | 依赖 |
+|------|------|
+| `interactive/nimmt.html` | 无（浏览器直接打开） |
+| `interactive/nimmt.py` + `ql/` | Python 3.8+ 标准库 |
+| `dqn/` + `ppo/` + `interactive/nimmt_arena.py` | `torch>=2.0` + `numpy>=1.24` |
 
 ---
 

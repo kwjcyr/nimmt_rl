@@ -10,8 +10,8 @@
   玩家5  AI-规则（safe）
 
 用法：
-  python3 nimmt_arena.py          # 直接对战（需要事先训练过模型）
-  python3 nimmt_arena.py train    # 先训练三种模型再对战
+  python3 interactive/nimmt_arena.py          # 直接对战（需要事先训练过模型）
+  python3 interactive/nimmt_arena.py train    # 先训练三种模型再对战
 
 如果模型文件不存在，对应 RL 玩家会自动降级为规则 AI。
 """
@@ -21,10 +21,15 @@ import random
 import sys
 
 # =========================================================
-#  路径
+#  路径设置：把各子模块加入 sys.path
 # =========================================================
-_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, _DIR)
+_INTERACTIVE_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR        = os.path.dirname(_INTERACTIVE_DIR)
+_MODELS_DIR      = os.path.join(_ROOT_DIR, "models")
+
+# 把 ql / dqn / ppo 目录都加入路径，方便 import
+for _sub in ("ql", "dqn", "ppo"):
+    sys.path.insert(0, os.path.join(_ROOT_DIR, _sub))
 
 # =========================================================
 #  游戏常量
@@ -115,7 +120,7 @@ def load_ppo():
     try:
         import nimmt_ppo as ppo_mod
         agent = ppo_mod.PPOAgent()
-        path = os.path.join(_DIR, "nimmt_ppo_model.pth")
+        path = os.path.join(_MODELS_DIR, "nimmt_ppo_model.pth")
         if os.path.exists(path):
             agent.load(path)
             print("  ✅ PPO 模型加载成功")
@@ -131,7 +136,7 @@ def load_dqn():
     try:
         import nimmt_dqn as dqn_mod
         agent = dqn_mod.DQNAgent()
-        path = os.path.join(_DIR, "nimmt_dqn_model.pth")
+        path = os.path.join(_MODELS_DIR, "nimmt_dqn_model.pth")
         if os.path.exists(path):
             agent.load(path)
             print("  ✅ DQN 模型加载成功")
@@ -147,7 +152,7 @@ def load_ql():
     try:
         import nimmt_ql as ql_mod
         agent = ql_mod.QLearningAgent()
-        path = os.path.join(_DIR, "nimmt_q_table.pkl")
+        path = os.path.join(_MODELS_DIR, "nimmt_q_table.pkl")
         if os.path.exists(path):
             agent.load(path)
             print("  ✅ Q-Learning 模型加载成功")
@@ -182,7 +187,6 @@ def display_board(rows, scores, names):
 def display_hand(hand, name="你"):
     print(f"\n  🃏 {name} 的手牌：")
     for i, card in enumerate(hand):
-        b = get_bulls(card)
         print(f"     [{i+1}] {card:3d}  {bull_str(card)}")
 
 
@@ -238,32 +242,26 @@ def arena(ppo_fn, dqn_fn, ql_fn):
         display_board(rows, scores, SHORT)
 
         # ---- 各玩家选牌 ----
-        chosen_idx = [None] * NUM_PLAYERS
+        chosen_idx  = [None] * NUM_PLAYERS
         chosen_card = [None] * NUM_PLAYERS
 
-        # 真人
         chosen_idx[0]  = human_choose_card(hands[0], rows, scores, NAMES[0])
         chosen_card[0] = hands[0][chosen_idx[0]]
 
-        # PPO
         chosen_idx[1]  = ppo_fn(hands[1], rows, scores[1])
         chosen_card[1] = hands[1][chosen_idx[1]]
 
-        # DQN
         chosen_idx[2]  = dqn_fn(hands[2], rows, scores[2])
         chosen_card[2] = hands[2][chosen_idx[2]]
 
-        # Q-Learning
         chosen_idx[3]  = ql_fn(hands[3], rows, scores[3])
         chosen_card[3] = hands[3][chosen_idx[3]]
 
-        # 规则 AI
         chosen_card[4] = ai_choose_card(hands[4], rows, "greedy")
         chosen_idx[4]  = hands[4].index(chosen_card[4])
         chosen_card[5] = ai_choose_card(hands[5], rows, "safe")
         chosen_idx[5]  = hands[5].index(chosen_card[5])
 
-        # 从手牌移除
         for i in range(NUM_PLAYERS):
             hands[i].remove(chosen_card[i])
 
@@ -274,35 +272,29 @@ def arena(ppo_fn, dqn_fn, ql_fn):
 
         # ---- 按牌面从小到大放牌 ----
         order = sorted(range(NUM_PLAYERS), key=lambda i: chosen_card[i])
-        print(f"\n  🃏 放牌顺序（小→大）：")
+        print(f"\n  🃏 放牌结算：")
         for pi in order:
             card = chosen_card[pi]
             br = find_best_row(rows, card)
 
             if br == -1:
-                # 必须收一列
                 if pi == 0:
-                    # 真人自己选
                     r = human_choose_row(rows, card, NAMES[0])
                 else:
                     r = ai_choose_row(rows)
                 pen = place_card(rows, card, r)
                 scores[pi] += pen
-                msg = f"比所有列末尾小，收走列{r+1} 💥-{pen}🐂" if pen else f"比所有列末尾小，收走列{r+1}"
+                msg = f"比所有列末尾小，收走列{r+1} 💥-{pen}🐂" if pen else f"收走列{r+1}"
             else:
                 pen = place_card(rows, card)
                 scores[pi] += pen
-                msg = f"💥 列满收走 -{pen}🐂" if pen else f"放入列{find_best_row(rows, card)+2 if br == -1 else br+1}"  # 已放入，br+1 只是显示用
-                if pen == 0:
-                    msg = "✅ 安全放入"
-                else:
-                    msg = f"💥 触发收牌 -{pen}🐂"
+                msg = f"💥 触发收牌 -{pen}🐂" if pen else "✅ 安全放入"
 
             mark = " ← 你！" if pi == 0 else ""
             print(f"     {NAMES[pi]:<16}  {card:3d}  {msg}{mark}")
 
         if max(scores) >= END_SCORE or len(hands[0]) == 0:
-            print("\n  ⏹  游戏结束条件触发！")
+            print("\n  ⏹  游戏结束！")
             break
 
     # ---- 最终排名 ----
@@ -329,29 +321,31 @@ def arena(ppo_fn, dqn_fn, ql_fn):
 
 
 # =========================================================
-#  训练三种模型
+#  训练三种模型（保存到 models/ 目录）
 # =========================================================
 def train_all(episodes=30000):
+    import nimmt_ql as ql_mod
+    import nimmt_dqn as dqn_mod
+    import nimmt_ppo as ppo_mod
+
+    os.makedirs(_MODELS_DIR, exist_ok=True)
     print("\n📚 训练三种 RL 模型（各 30000 局）...\n")
 
     print("── Q-Learning ──")
-    import nimmt_ql as ql_mod
     ql_agent = ql_mod.QLearningAgent()
     for _ in range(episodes):
         ql_mod.run_episode(ql_agent, training=True)
-    ql_agent.save(os.path.join(_DIR, "nimmt_q_table.pkl"))
+    ql_agent.save(os.path.join(_MODELS_DIR, "nimmt_q_table.pkl"))
 
     print("\n── DQN ──")
-    import nimmt_dqn as dqn_mod
     dqn_agent = dqn_mod.DQNAgent()
     for ep in range(1, episodes + 1):
         dqn_mod.run_episode(dqn_agent, training=True)
         if ep % 5000 == 0:
             print(f"  DQN ep {ep}/{episodes}")
-    dqn_agent.save(os.path.join(_DIR, "nimmt_dqn_model.pth"))
+    dqn_agent.save(os.path.join(_MODELS_DIR, "nimmt_dqn_model.pth"))
 
     print("\n── PPO ──")
-    import nimmt_ppo as ppo_mod
     ppo_agent = ppo_mod.PPOAgent()
     for ep in range(1, episodes + 1):
         ppo_mod.run_episode(ppo_agent, training=True)
@@ -359,7 +353,7 @@ def train_all(episodes=30000):
             ppo_agent.update()
         if ep % 5000 == 0:
             print(f"  PPO ep {ep}/{episodes}")
-    ppo_agent.save(os.path.join(_DIR, "nimmt_ppo_model.pth"))
+    ppo_agent.save(os.path.join(_MODELS_DIR, "nimmt_ppo_model.pth"))
 
     print("\n✅ 全部训练完成！\n")
 
