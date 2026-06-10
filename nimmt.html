@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐂 牛头王 6 Nimmt!</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    background: #1a1a2e;
+    color: #eee;
+    min-height: 100vh;
+  }
+
+  /* ===== 布局 ===== */
+  #app { max-width: 1100px; margin: 0 auto; padding: 16px; }
+
+  h1 {
+    text-align: center;
+    font-size: 2rem;
+    margin-bottom: 6px;
+    background: linear-gradient(135deg, #f9c74f, #f3722c);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .subtitle { text-align: center; color: #aaa; font-size: 0.85rem; margin-bottom: 16px; }
+
+  /* ===== 分数条 ===== */
+  #scoreboard {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    justify-content: center; margin-bottom: 16px;
+  }
+  .score-card {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    padding: 8px 14px;
+    min-width: 80px;
+    text-align: center;
+    transition: border-color 0.3s;
+  }
+  .score-card.human { border-color: #f9c74f; background: #1a1a2e; }
+  .score-card .name { font-size: 0.8rem; color: #aaa; }
+  .score-card .pts { font-size: 1.4rem; font-weight: bold; }
+  .score-card.human .pts { color: #f9c74f; }
+  .score-card.danger .pts { color: #f3722c; }
+
+  /* ===== 牌桌 ===== */
+  #rows-section { margin-bottom: 16px; }
+  .section-title {
+    font-size: 0.85rem; color: #aaa; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .rows-grid { display: flex; flex-direction: column; gap: 8px; }
+  .row-wrap {
+    display: flex; align-items: center; gap: 8px;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    padding: 10px 12px;
+    transition: border-color 0.3s;
+  }
+  .row-wrap.full { border-color: #f3722c; }
+  .row-label { color: #aaa; font-size: 0.8rem; min-width: 30px; }
+  .row-cards { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+  .row-slots {
+    display: flex; gap: 4px; margin-left: auto;
+  }
+  .slot { width: 12px; height: 12px; border-radius: 3px; background: #0f3460; }
+  .slot.filled { background: #4cc9f0; }
+
+  /* ===== 卡牌样式 ===== */
+  .card {
+    display: inline-flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    width: 52px; height: 68px;
+    border-radius: 8px;
+    border: 2px solid #333;
+    background: #fff;
+    color: #222;
+    font-weight: bold;
+    cursor: default;
+    user-select: none;
+    transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+    position: relative;
+    font-size: 1.1rem;
+  }
+  .card .num { line-height: 1; }
+  .card .bulls { font-size: 0.65rem; line-height: 1; margin-top: 2px; color: #c0392b; }
+
+  /* 按牛头数上色 */
+  .card.b1 { background: #fff; }
+  .card.b2 { background: #fef9e7; border-color: #f39c12; }
+  .card.b3 { background: #fef3e2; border-color: #e67e22; }
+  .card.b5 { background: #fde8d8; border-color: #e74c3c; }
+  .card.b7 { background: #fdecec; border-color: #c0392b; color: #c0392b; }
+
+  /* 手牌可点击 */
+  .card.selectable {
+    cursor: pointer; border-color: #4cc9f0;
+    box-shadow: 0 0 0 0 #4cc9f0;
+  }
+  .card.selectable:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 8px 20px rgba(76,201,240,0.4);
+    border-color: #4cc9f0;
+    z-index: 10;
+  }
+  .card.selected {
+    transform: translateY(-10px);
+    box-shadow: 0 8px 24px rgba(249,199,79,0.6);
+    border-color: #f9c74f !important;
+    background: #fffbe6;
+    z-index: 20;
+  }
+
+  /* ===== 手牌区 ===== */
+  #hand-section { margin-bottom: 16px; }
+  #hand-cards {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    min-height: 80px; align-items: flex-end;
+  }
+
+  /* ===== 按钮 ===== */
+  .btn {
+    padding: 10px 24px;
+    border: none; border-radius: 8px;
+    font-size: 1rem; font-weight: bold;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+  .btn:hover { opacity: 0.85; transform: scale(1.02); }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn-primary { background: linear-gradient(135deg, #4cc9f0, #4361ee); color: #fff; }
+  .btn-warning { background: linear-gradient(135deg, #f9c74f, #f3722c); color: #fff; }
+  .btn-danger  { background: linear-gradient(135deg, #f3722c, #c0392b); color: #fff; }
+  .btn-gray    { background: #2a2a4a; color: #aaa; border: 1px solid #444; }
+
+  /* ===== 行动区 ===== */
+  #action-area {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    min-height: 80px;
+  }
+  #action-msg { font-size: 1rem; margin-bottom: 12px; line-height: 1.6; }
+  #action-btns { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  /* ===== 日志 ===== */
+  #log-section {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    padding: 12px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .log-entry { font-size: 0.82rem; color: #ccc; padding: 2px 0; border-bottom: 1px solid #0f3460; }
+  .log-entry:last-child { border-bottom: none; }
+  .log-entry.penalty { color: #f3722c; }
+  .log-entry.you { color: #f9c74f; }
+  .log-entry.system { color: #4cc9f0; }
+
+  /* ===== 模态框 ===== */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.75);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100;
+  }
+  .modal {
+    background: #1a1a2e;
+    border: 1px solid #0f3460;
+    border-radius: 16px;
+    padding: 28px;
+    max-width: 480px; width: 90%;
+    text-align: center;
+  }
+  .modal h2 { font-size: 1.5rem; margin-bottom: 12px; }
+  .modal p  { color: #aaa; margin-bottom: 16px; line-height: 1.6; font-size: 0.9rem; }
+  .ranking-list { text-align: left; margin-bottom: 16px; }
+  .ranking-row {
+    display: flex; justify-content: space-between;
+    padding: 6px 10px; border-radius: 6px; margin-bottom: 4px;
+    background: #16213e;
+  }
+  .ranking-row.winner { background: #2a2a0e; border: 1px solid #f9c74f; }
+  .ranking-row.you-row { border: 1px solid #4cc9f0; }
+
+  /* ===== 选列模态框 ===== */
+  .row-choices { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  .row-choice-btn {
+    display: flex; justify-content: space-between; align-items: center;
+    background: #16213e; border: 1px solid #0f3460;
+    border-radius: 8px; padding: 10px 14px;
+    cursor: pointer; transition: border-color 0.2s, background 0.2s;
+  }
+  .row-choice-btn:hover { border-color: #f3722c; background: #1e1e3e; }
+  .row-choice-cards { display: flex; gap: 4px; }
+  .mini-card {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 40px;
+    border-radius: 5px; border: 1.5px solid #444;
+    background: #fff; color: #222;
+    font-size: 0.7rem; font-weight: bold;
+  }
+
+  /* ===== 开始页 ===== */
+  #start-screen {
+    text-align: center; padding: 40px 20px;
+  }
+  #start-screen h1 { font-size: 2.8rem; margin-bottom: 10px; }
+  .rules-box {
+    background: #16213e; border: 1px solid #0f3460;
+    border-radius: 12px; padding: 20px; margin: 20px auto;
+    max-width: 500px; text-align: left;
+  }
+  .rules-box li { margin: 6px 0; color: #ccc; font-size: 0.9rem; }
+
+  /* 动画 */
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .fade-in { animation: fadeIn 0.3s ease; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- 开始界面 -->
+  <div id="start-screen">
+    <h1>🐂 牛头王</h1>
+    <p class="subtitle">6 Nimmt! · 1人 vs 5个AI</p>
+    <div class="rules-box">
+      <ul>
+        <li>🃏 共 <b>100</b> 张牌（1-100），6位玩家各拿10张</li>
+        <li>📋 牌桌5列，每列初始1张</li>
+        <li>⚡ 所有人同时出牌，从小到大依次放入最合适的列</li>
+        <li>💥 你的牌是某列<b>第7张</b> → 拿走整列获得罚分🐂</li>
+        <li>😱 你的牌比所有列末尾都小 → 自选一列拿走</li>
+        <li>🏆 累计分数最少者获胜，超过 <b>66分</b> 游戏结束</li>
+      </ul>
+    </div>
+    <button class="btn btn-warning" style="font-size:1.2rem;padding:14px 40px;" onclick="startGame()">开始游戏 🎮</button>
+  </div>
+
+  <!-- 游戏界面（初始隐藏） -->
+  <div id="game-screen" style="display:none">
+    <h1>🐂 牛头王</h1>
+
+    <!-- 分数 -->
+    <div id="scoreboard"></div>
+
+    <!-- 牌桌 -->
+    <div id="rows-section">
+      <div class="section-title">📋 牌桌</div>
+      <div id="rows-grid" class="rows-grid"></div>
+    </div>
+
+    <!-- 行动提示 -->
+    <div id="action-area">
+      <div id="action-msg"></div>
+      <div id="action-btns"></div>
+    </div>
+
+    <!-- 手牌 -->
+    <div id="hand-section">
+      <div class="section-title">🃏 你的手牌 <span id="round-label" style="margin-left:auto;"></span></div>
+      <div id="hand-cards"></div>
+    </div>
+
+    <!-- 日志 -->
+    <div id="log-section"></div>
+  </div>
+</div>
+
+<!-- 选列模态框 -->
+<div id="row-modal" class="modal-overlay" style="display:none">
+  <div class="modal">
+    <h2>😱 你的牌最小！</h2>
+    <p>你的牌比所有列末尾都小，必须选一列收走（你将获得该列的牛头罚分）</p>
+    <div id="row-choices" class="row-choices"></div>
+  </div>
+</div>
+
+<!-- 结束模态框 -->
+<div id="end-modal" class="modal-overlay" style="display:none">
+  <div class="modal">
+    <h2 id="end-title"></h2>
+    <p id="end-desc"></p>
+    <div id="end-ranking" class="ranking-list"></div>
+    <button class="btn btn-warning" onclick="startGame()">再来一局 🔄</button>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  游戏逻辑
+// ============================================================
+
+const TOTAL = 100;
+const NUM_ROWS = 5;
+const MAX_ROW = 6;    // 每列最多6张，第7张触发收牌
+const HAND_SIZE = 10;
+const END_SCORE = 66;
+const NUM_PLAYERS = 6;
+const PLAYER_NAMES = ["你", "A", "B", "C", "D", "E"];
+const AI_STRATEGIES = ["greedy","safe","greedy","random","safe"];
+
+let state = {};
+
+function getBulls(card) {
+  if (card === 55) return 7;
+  if (card % 11 === 0) return 5;
+  if (card % 10 === 0) return 3;
+  if (card % 5 === 0) return 2;
+  return 1;
+}
+
+function bullsStr(n) {
+  return "🐂".repeat(n);
+}
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function deal() {
+  const deck = shuffle([...Array(TOTAL)].map((_, i) => i + 1));
+  const hands = [];
+  for (let i = 0; i < NUM_PLAYERS; i++) {
+    hands.push(deck.slice(i * HAND_SIZE, (i + 1) * HAND_SIZE).sort((a, b) => a - b));
+  }
+  const rows = [];
+  const start = NUM_PLAYERS * HAND_SIZE;
+  // 底牌按升序排列（小的在列1，大的在列5）
+  const baseCards = deck.slice(start, start + NUM_ROWS).sort((a, b) => a - b);
+  for (let r = 0; r < NUM_ROWS; r++) rows.push([baseCards[r]]);
+  return { hands, rows };
+}
+
+function rowBulls(row) {
+  return row.reduce((s, c) => s + getBulls(c), 0);
+}
+
+function findBestRow(rows, card) {
+  let best = -1, minDiff = Infinity;
+  for (let r = 0; r < NUM_ROWS; r++) {
+    const tail = rows[r][rows[r].length - 1];
+    if (tail < card && (card - tail) < minDiff) {
+      minDiff = card - tail;
+      best = r;
+    }
+  }
+  return best;
+}
+
+// AI 选牌 —— 带性格 + 随机扰动，更像真人
+function aiChooseCard(hand, rows, strategy) {
+  // 对每张牌计算"风险分"
+  const scored = hand.map(card => {
+    const br = findBestRow(rows, card);
+    let risk;
+    if (br === -1) {
+      // 牌最小，必须收列 —— 很危险
+      risk = Math.min(...rows.map(rowBulls)) + 80;
+    } else if (rows[br].length >= MAX_ROW) {
+      // 列满，会收走
+      risk = rowBulls(rows[br]) + 40;
+    } else {
+      // 安全，列越满风险越高
+      const filled = rows[br].length;
+      risk = filled * 3;  // 0~15
+    }
+    return { card, risk };
+  });
+
+  // 按风险排序
+  scored.sort((a, b) => a.risk - b.risk);
+
+  if (strategy === "random") {
+    // 完全随机
+    return hand[Math.floor(Math.random() * hand.length)];
+  }
+
+  if (strategy === "safe") {
+    // 保守：90%概率选风险最低的，10%随机选前半张
+    if (Math.random() < 0.1) {
+      const pool = scored.slice(0, Math.ceil(scored.length / 2));
+      return pool[Math.floor(Math.random() * pool.length)].card;
+    }
+    return scored[0].card;
+  }
+
+  if (strategy === "greedy") {
+    // 激进：有时故意出大牌"赌"没人触发那列
+    // 70%选低风险，20%选中间，10%出最大牌赌一把
+    const r = Math.random();
+    if (r < 0.70) {
+      // 低风险区随机选一张（前1/3）
+      const pool = scored.slice(0, Math.max(1, Math.floor(scored.length / 3)));
+      return pool[Math.floor(Math.random() * pool.length)].card;
+    } else if (r < 0.90) {
+      // 中间区
+      const mid = Math.floor(scored.length / 2);
+      const pool = scored.slice(mid - 1, mid + 2).filter(Boolean);
+      return pool[Math.floor(Math.random() * pool.length)].card;
+    } else {
+      // 出最大牌，赌一把
+      return hand[hand.length - 1];
+    }
+  }
+
+  // 默认：带噪声的贪心
+  // 给每张牌加随机扰动，避免完全可预测
+  const noisy = scored.map(({ card, risk }) => ({
+    card,
+    score: risk + (Math.random() * 10 - 3)  // ±扰动
+  }));
+  noisy.sort((a, b) => a.score - b.score);
+  return noisy[0].card;
+}
+
+function aiChooseRow(rows) {
+  let best = 0, minB = Infinity;
+  for (let r = 0; r < NUM_ROWS; r++) {
+    const b = rowBulls(rows[r]);
+    if (b < minB) { minB = b; best = r; }
+  }
+  return best;
+}
+
+// ============================================================
+//  游戏流程状态机
+//  phase: 'pick' | 'resolve' | 'choose_row' | 'end'
+// ============================================================
+
+function startGame() {
+  document.getElementById("start-screen").style.display = "none";
+  document.getElementById("game-screen").style.display = "block";
+  document.getElementById("end-modal").style.display = "none";
+
+  const { hands, rows } = deal();
+  state = {
+    phase: "pick",
+    hands,
+    rows,
+    scores: Array(NUM_PLAYERS).fill(0),
+    round: 1,
+    chosen: Array(NUM_PLAYERS).fill(null),
+    selectedCard: null,
+    pendingQueue: [],   // 待放牌队列（按从小到大排序）
+    pendingIdx: 0,
+    logs: [],
+  };
+
+  addLog("游戏开始！🎲", "system");
+  render();
+}
+
+// 玩家点击手牌
+function onCardClick(card) {
+  if (state.phase !== "pick") return;
+  state.selectedCard = card;
+  renderHand();
+  renderAction();
+}
+
+// 玩家确认出牌
+function confirmPlay() {
+  if (!state.selectedCard) return;
+  state.chosen[0] = state.selectedCard;
+
+  // AI 出牌
+  for (let i = 1; i < NUM_PLAYERS; i++) {
+    state.chosen[i] = aiChooseCard(state.hands[i], state.rows, AI_STRATEGIES[i - 1]);
+  }
+
+  // 从手牌移除
+  for (let i = 0; i < NUM_PLAYERS; i++) {
+    state.hands[i] = state.hands[i].filter(c => c !== state.chosen[i]);
+  }
+
+  addLog(`第 ${state.round} 轮：你打出 ${state.chosen[0]} (${bullsStr(getBulls(state.chosen[0]))})`, "you");
+
+  // 构建按牌面排序的队列
+  state.pendingQueue = [...Array(NUM_PLAYERS).keys()]
+    .sort((a, b) => state.chosen[a] - state.chosen[b]);
+  state.pendingIdx = 0;
+  state.phase = "resolve";
+  resolveNext();
+}
+
+function resolveNext() {
+  if (state.pendingIdx >= state.pendingQueue.length) {
+    // 本轮结束
+    state.round++;
+    state.selectedCard = null;
+    state.chosen = Array(NUM_PLAYERS).fill(null);
+
+    if (state.hands[0].length === 0 || Math.max(...state.scores) >= END_SCORE) {
+      state.phase = "end";
+      render();
+      showEndModal();
+      return;
+    }
+    state.phase = "pick";
+    render();
+    return;
+  }
+
+  const pi = state.pendingQueue[state.pendingIdx];
+  const card = state.chosen[pi];
+  const br = findBestRow(state.rows, card);
+
+  if (br === -1) {
+    // 需要选列
+    if (pi === 0) {
+      // 人类选列
+      state.phase = "choose_row";
+      state.choosingForCard = card;
+      render();
+      showRowModal(card);
+    } else {
+      const r = aiChooseRow(state.rows);
+      const penalty = rowBulls(state.rows[r]);
+      state.scores[pi] += penalty;
+      addLog(`${PLAYER_NAMES[pi]} 打出 ${card}，牌最小，收走第${r+1}列 -${penalty}🐂`, penalty > 0 ? "penalty" : "");
+      state.rows[r] = [card];
+      state.pendingIdx++;
+      render();
+      setTimeout(resolveNext, 300);
+    }
+  } else if (state.rows[br].length >= MAX_ROW) {
+    // 列满，收走
+    const penalty = rowBulls(state.rows[br]);
+    state.scores[pi] += penalty;
+    const marker = pi === 0 ? "（你）" : "";
+    addLog(`${PLAYER_NAMES[pi]}${marker} 打出 ${card}，第${br+1}列已满 -${penalty}🐂`, penalty > 0 ? "penalty" : "");
+    state.rows[br] = [card];
+    state.pendingIdx++;
+    render();
+    setTimeout(resolveNext, 300);
+  } else {
+    // 正常放入
+    const marker = pi === 0 ? "（你）" : "";
+    addLog(`${PLAYER_NAMES[pi]}${marker} 打出 ${card} → 放入第${br+1}列`);
+    state.rows[br].push(card);
+    state.pendingIdx++;
+    render();
+    setTimeout(resolveNext, 200);
+  }
+}
+
+// 人类选择收走哪列
+function humanChooseRow(r) {
+  document.getElementById("row-modal").style.display = "none";
+  const card = state.choosingForCard;
+  const penalty = rowBulls(state.rows[r]);
+  state.scores[0] += penalty;
+  addLog(`你选择收走第${r+1}列 -${penalty}🐂`, "penalty");
+  state.rows[r] = [card];
+  state.phase = "resolve";
+  state.pendingIdx++;
+  render();
+  setTimeout(resolveNext, 300);
+}
+
+function addLog(msg, cls = "") {
+  state.logs.unshift({ msg, cls });
+  if (state.logs.length > 60) state.logs.pop();
+}
+
+// ============================================================
+//  渲染
+// ============================================================
+
+function render() {
+  renderScoreboard();
+  renderRows();
+  renderHand();
+  renderAction();
+  renderLog();
+}
+
+function cardHTML(card, cls = "", onclick = "") {
+  const b = getBulls(card);
+  const bClass = `b${b}`;
+  const clickStr = onclick ? `onclick="${onclick}"` : "";
+  return `<div class="card ${bClass} ${cls}" ${clickStr}>
+    <span class="num">${card}</span>
+    <span class="bulls">${bullsStr(b)}</span>
+  </div>`;
+}
+
+function miniCardHTML(card) {
+  const b = getBulls(card);
+  return `<div class="mini-card" style="border-color:${b>=5?'#e74c3c':b>=3?'#e67e22':b>=2?'#f39c12':'#aaa'}">${card}</div>`;
+}
+
+function renderScoreboard() {
+  const el = document.getElementById("scoreboard");
+  el.innerHTML = state.scores.map((s, i) => {
+    const isHuman = i === 0;
+    const isDanger = s >= END_SCORE * 0.7;
+    return `<div class="score-card ${isHuman ? 'human' : ''} ${isDanger ? 'danger' : ''}">
+      <div class="name">${PLAYER_NAMES[i]}</div>
+      <div class="pts">${s} 🐂</div>
+    </div>`;
+  }).join("");
+}
+
+function renderRows() {
+  const el = document.getElementById("rows-grid");
+  el.innerHTML = state.rows.map((row, r) => {
+    const isFull = row.length >= MAX_ROW;
+    const cards = row.map(c => cardHTML(c)).join("");
+    const slots = [...Array(MAX_ROW)].map((_, i) =>
+      `<div class="slot ${i < row.length ? 'filled' : ''}"></div>`
+    ).join("");
+    return `<div class="row-wrap ${isFull ? 'full' : ''}">
+      <div class="row-label">列${r + 1}</div>
+      <div class="row-cards">${cards}</div>
+      <div class="row-slots">${slots}</div>
+    </div>`;
+  }).join("");
+}
+
+function renderHand() {
+  const el = document.getElementById("hand-cards");
+  const hand = state.hands[0];
+  if (!hand) return;
+  el.innerHTML = hand.map(card => {
+    const isSelected = card === state.selectedCard;
+    const isPickPhase = state.phase === "pick";
+    const cls = isPickPhase ? (isSelected ? "selectable selected" : "selectable") : "";
+    const onclick = isPickPhase ? `onCardClick(${card})` : "";
+    return cardHTML(card, cls, onclick);
+  }).join("");
+
+  const label = document.getElementById("round-label");
+  label.textContent = `第 ${state.round} 轮 · 剩余 ${hand.length} 张`;
+}
+
+function renderAction() {
+  const msgEl = document.getElementById("action-msg");
+  const btnsEl = document.getElementById("action-btns");
+
+  if (state.phase === "pick") {
+    if (state.selectedCard) {
+      msgEl.innerHTML = `已选择：${cardHTML(state.selectedCard, "", "")} <span style="color:#aaa;font-size:0.85rem">点击其他牌重新选择</span>`;
+      btnsEl.innerHTML = `<button class="btn btn-primary" onclick="confirmPlay()">出这张牌 ✔</button>`;
+    } else {
+      msgEl.innerHTML = `<span style="color:#aaa">👆 点击你的手牌选一张出</span>`;
+      btnsEl.innerHTML = "";
+    }
+  } else if (state.phase === "resolve") {
+    const pi = state.pendingQueue[state.pendingIdx];
+    const names = state.pendingQueue.slice(state.pendingIdx).map(i => PLAYER_NAMES[i]);
+    msgEl.innerHTML = `⏳ 正在结算... 待处理：${names.slice(0,4).join(", ")}${names.length>4?"...":""}`;
+    btnsEl.innerHTML = "";
+  } else if (state.phase === "choose_row") {
+    msgEl.innerHTML = `😱 你的牌 <b>${state.choosingForCard}</b> 最小，请选择要收走的一列`;
+    btnsEl.innerHTML = "";
+  } else if (state.phase === "end") {
+    msgEl.innerHTML = `🏁 游戏结束！`;
+    btnsEl.innerHTML = `<button class="btn btn-warning" onclick="startGame()">再来一局 🔄</button>`;
+  }
+}
+
+function renderLog() {
+  const el = document.getElementById("log-section");
+  el.innerHTML = state.logs.map(({ msg, cls }) =>
+    `<div class="log-entry ${cls}">${msg}</div>`
+  ).join("");
+}
+
+// ============================================================
+//  模态框
+// ============================================================
+
+function showRowModal(card) {
+  const el = document.getElementById("row-choices");
+  el.innerHTML = state.rows.map((row, r) => {
+    const bulls = rowBulls(row);
+    const cards = row.map(c => miniCardHTML(c)).join("");
+    return `<div class="row-choice-btn" onclick="humanChooseRow(${r})">
+      <div>
+        <div style="font-size:0.8rem;color:#aaa;margin-bottom:4px">第${r+1}列（罚分：${bulls}🐂）</div>
+        <div class="row-choice-cards">${cards}</div>
+      </div>
+      <div style="color:#f3722c;font-size:1.2rem">→ 收走</div>
+    </div>`;
+  }).join("");
+  document.getElementById("row-modal").style.display = "flex";
+}
+
+function showEndModal() {
+  const ranking = [...Array(NUM_PLAYERS).keys()]
+    .sort((a, b) => state.scores[a] - state.scores[b]);
+
+  const winner = ranking[0];
+  const humanRank = ranking.indexOf(0) + 1;
+
+  document.getElementById("end-title").textContent =
+    winner === 0 ? "🎉 你赢了！" : `${PLAYER_NAMES[winner]} 获胜！`;
+  document.getElementById("end-desc").textContent =
+    winner === 0 ? "牛头最少，恭喜你！" : `你排名第 ${humanRank}，再接再厉！`;
+
+  const medals = ["🥇","🥈","🥉","4️⃣","5️⃣","6️⃣"];
+  document.getElementById("end-ranking").innerHTML = ranking.map((pi, rank) =>
+    `<div class="ranking-row ${rank===0?'winner':''} ${pi===0?'you-row':''}">
+      <span>${medals[rank]} ${PLAYER_NAMES[pi]}${pi===0?" (你)":""}</span>
+      <span>${state.scores[pi]} 🐂</span>
+    </div>`
+  ).join("");
+
+  document.getElementById("end-modal").style.display = "flex";
+}
+</script>
+</body>
+</html>
+
