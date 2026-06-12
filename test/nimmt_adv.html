@@ -120,7 +120,7 @@
 
   /* ===== Hand ===== */
   #hand-section { margin-bottom: 16px; }
-  #hand-cards { display: flex; flex-wrap: wrap; gap: 8px; min-height: 80px; align-items: flex-end; }
+  #hand-cards { display: flex; flex-wrap: wrap; gap: 8px; min-height: 80px; align-items: flex-start; }
 
   /* ===== Buttons ===== */
   .btn {
@@ -236,6 +236,19 @@
   }
   .waiting-info.full { color: #2ecc71; background: #0e1a0e; border-color: #1a2a1a; }
 
+  /* ===== Played Cards (current round) - only shows YOUR card ===== */
+  #played-section { margin-bottom: 16px; }
+  .played-grid {
+    display: flex; gap: 6px; flex-wrap: wrap; min-height: 48px;
+    padding: 8px 12px; background: #0f1a2e; border: 1px solid #0f3460; border-radius: 10px;
+    align-items: center; justify-content: center;
+  }
+  .played-item {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #1a1a0e; border: 1px solid #f9c74f; border-radius: 8px;
+    padding: 6px 14px; font-size: 0.9rem;
+  }
+
   @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
   .fade-in { animation: fadeIn 0.3s ease; }
 </style>
@@ -324,6 +337,11 @@
       <div id="rowsGrid" class="rows-grid"></div>
     </div>
 
+    <div id="played-section">
+      <div class="section-title">🃏 已出牌 <span id="playedInfo" style="margin-left:auto;color:#888;font-size:0.78rem"></span></div>
+      <div id="playedGrid" class="played-grid"></div>
+    </div>
+
     <div id="action-area">
       <div id="actionMsg"></div>
       <div id="actionBtns"></div>
@@ -401,6 +419,8 @@ let state = {
   round: 1,
   selectedCard: null,
   logs: [],
+  playedCards: {},           // {pid: card} - 当前轮已出的牌
+  _rowsSnapshot: "",        // rows快照（pick_row时用）,
   numHumans: 2,            // 房间需要的实际玩家数
   numAI: 2                 // 房间的AI玩家数
 };
@@ -711,6 +731,7 @@ function handleServerMessage(msg) {
       state.scores = {};
       state.selectedCard = null;
       state.logs = [{msg:"\uD83C\uDFAE Game started!", cls:"system"}];
+      state.playedCards = {};
       console.log("[DEBUG] game_start: hand=", JSON.stringify(state.hand), "rows=", JSON.stringify(state.rows));
       // Update players list from server (includes all players with correct order)
       if (msg.players) {
@@ -726,13 +747,23 @@ function handleServerMessage(msg) {
       break;
 
     case "card_played":
-      setActionMsg("\u23F3 玩家出牌中... (剩余 " + msg.remaining + ")");
+      // Only show generic info in action area (no card values to avoid cheating)
+      setActionMsg("\u23F3 " + (msg.player_name || "玩家") + " 已出牌 (剩余 " + msg.remaining + ")");
+
+      // Only track our own card for the "played" display
+      if (msg.played_cards && msg.played_cards[state.playerId] !== undefined) {
+        state.playedCards = {};
+        state.playedCards[state.playerId] = msg.played_cards[state.playerId];
+      }
+      renderAll();
       break;
 
     case "must_pick_row":
       state.phase = "pick_row";
       state.choosingForCard = msg.card;
+      // Use rows_snapshot for concurrency safety (prevents two players seeing stale row data)
       state.rows = msg.rows || state.rows;
+      state._rowsSnapshot = msg.rows_snapshot || "";
       setActionMsg("\u1F631 你的牌最小，请选择收走的列！");
       showRowModal();
       renderRows();
@@ -746,6 +777,7 @@ function handleServerMessage(msg) {
       state.phase = "playing";
       state.selectedCard = null;
       setActionMsg("\uD83C\uDCAF 第 " + msg.round + " 轮 \u2014 点击你的牌出牌");
+      state.playedCards = {};
       renderAll();
       break;
 
@@ -801,7 +833,7 @@ function confirmPlay() {
 function humanChooseRow(r) {
   hideRowModal();
   var card = state.choosingForCard;
-  sendToServer({ type: "pick_row", row: r, card: card });
+  sendToServer({ type: "pick_row", row: r, card: card, rows_snapshot: state._rowsSnapshot });
   setActionMsg("\u23F3 结算中...");
 }
 
@@ -834,7 +866,23 @@ window.onCardClick = function(card) {
 
 function renderAll() {
   console.log("[DEBUG] renderAll: phase=", state.phase, "handLen=", state.hand ? state.hand.length : "null", "rowsLen=", state.rows ? state.rows.length : "null");
-  renderScoreboard(); renderRows(); renderHand(); renderAction(); renderLog();
+  renderScoreboard(); renderRows(); renderPlayedCards(); renderHand(); renderAction(); renderLog();
+}
+
+function renderPlayedCards() {
+  var el = document.getElementById("playedGrid");
+  var infoEl = document.getElementById("playedInfo");
+  if (!el) return;
+
+  // Only show own played card (no cheating!)
+  var myCard = state.playedCards[state.playerId];
+  if (myCard !== undefined) {
+    if (infoEl) infoEl.textContent = '';
+    el.innerHTML = '<div class="played-item"><span style="color:#f9c74f;font-weight:bold;">\u2705 \u4f60</span><span style="margin-left:4px;color:#f9c74f;font-size:1.1rem;">' + myCard + '</span></div>';
+  } else {
+    if (infoEl) infoEl.textContent = '';
+    el.innerHTML = '<div style="color:#444;text-align:center;padding:12px;font-size:0.85rem">\u23F3 \u7b49\u5f85\u51fa\u724c...</div>';
+  }
 }
 
 function renderScoreboard() {
