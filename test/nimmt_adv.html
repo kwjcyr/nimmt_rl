@@ -756,6 +756,20 @@ function handleServerMessage(msg) {
         state.playedCards[state.playerId] = msg.played_cards[state.playerId];
       }
       renderAll();
+
+      // Safety net: if we're the last player (remaining=0), round_end should arrive next.
+      // If it doesn't come within 2s, force a poll restart to pick up any missed messages.
+      if (parseInt(msg.remaining) === 0) {
+        (function() {
+          var prevPhase = state.phase;
+          setTimeout(function() {
+            if (state.phase === prevPhase && state.phase === "playing") {
+              console.log("[Safety] round_end not received, forcing poll refresh");
+              pollTs = 0;  // reset timestamp to re-fetch all messages
+            }
+          }, 2000);
+        })();
+      }
       break;
 
     case "must_pick_row":
@@ -825,9 +839,13 @@ function confirmPlay() {
   if (idx !== -1) state.hand.splice(idx, 1);
   addLog("你打出 " + card + " (" + bullsStr(getBulls(card)) + ")", "you");
   state.selectedCard = null;
+
+  // Immediately show our own played card (don't wait for server broadcast)
+  state.playedCards = {};
+  state.playedCards[state.playerId] = card;
+
   setActionMsg("\u23F3 等待其他玩家...");
-  renderHand();
-  renderAction();
+  renderAll();
 }
 
 function humanChooseRow(r) {
