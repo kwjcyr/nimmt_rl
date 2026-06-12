@@ -1,0 +1,154 @@
+<!-- ==================== START SCREEN ==================== -->
+<view wx:if="{{phase === 'start'}}" class="start-screen">
+  <text class="title">🤖 Arena 对战</text>
+  <text class="subtitle">You vs PPO vs DQN vs QL vs AI×2</text>
+
+  <view class="model-status">
+    <view class="model-item {{modelStatus.ppo ? 'ok' : 'bad'}}">
+      <text class="m-icon">🤖</text>
+      <text class="m-name">PPO</text>
+      <text class="m-state">{{modelStatus.ppo ? '✅ Loaded' : '❌ Offline'}}</text>
+    </view>
+    <view class="model-item {{modelStatus.dqn ? 'ok' : 'bad'}}">
+      <text class="m-icon">🔵</text>
+      <text class="m-name">DQN</text>
+      <text class="m-state">{{modelStatus.dqn ? '✅ Loaded' : '❌ Offline'}}</text>
+    </view>
+    <view class="model-item {{modelStatus.ql ? 'ok' : 'bad'}}">
+      <text class="m-icon">🟢</text>
+      <text class="m-name">Q-Learning</text>
+      <text class="m-state">{{modelStatus.ql ? '✅ Loaded' : '❌ Offline'}}</text>
+    </view>
+  </view>
+
+  <view class="rules-box">
+    <view class="rule-item">🎮 你 vs 5个AI对手同时出牌</view>
+    <view class="rule-item">🤖 PPO / 🔵 DQN / 🟢 QL = 训练好的强化学习模型</view>
+    <view class="rule-item">🔴 AI甲(贪婪) / 🟡 AI乙(保守) = 规则AI</view>
+    <view class="rule-item">⚡ 模型通过服务器API决策，更智能！</view>
+  </view>
+
+  <button class="btn-start" bindtap="startGame">开始对战 ⚔️</button>
+</view>
+
+<!-- ==================== GAME SCREEN (same as base) ==================== -->
+<block wx:if="{{phase !== 'start'}}">
+
+  <view class="header">
+    <text class="title-sm">🤖 Arena</text>
+  </view>
+
+  <!-- Scoreboard with AI names -->
+  <scroll-view scroll-x class="scoreboard" enhanced show-scrollbar="{{false}}">
+    <view
+      wx:for="{{scores}}" wx:key="index"
+      class="score-card {{index === 0 ? 'human' : ''}} {{item >= 46 ? 'danger' : ''}}"
+    >
+      <text class="s-name" style="font-size:18rpx;">{{index === 0 ? '你' : (index === 1 ? '🤖PPO' : (index === 2 ? '🔵DQN' : (index === 3 ? '🟢QL' : (index === 4 ? '🔵AI' : '🟡AI'))))}}</text>
+      <text class="s-pts">{{item}} 🐂</text>
+    </view>
+  </scroll-view>
+
+  <!-- Table Rows -->
+  <view class="section">
+    <text class="sec-title">📋 牌桌</text>
+    <view class="rows-grid">
+      <view wx:for="{{rowData}}" wx:key="index" class="row-wrap {{item.isFull ? 'full' : ''}}">
+        <text class="row-label">列{{item.label}}</text>
+        <scroll-view scroll-x class="row-cards" enhanced show-scrollbar="{{false}}">
+          <view wx:for="{{item.cards}}" wx:for-item="c" wx:key="index"
+            class="card {{c.cls}}">
+            <text class="c-num">{{c.num}}</text>
+            <text class="c-bull">{{c.bullsEmoji}}</text>
+          </view>
+        </scroll-view>
+        <view class="slots">
+          <view wx:for="{{item.slots}}" wx:key="index"
+            class="slot {{item.filled ? 'filled' : ''}}">
+          </view>
+        </view>
+        <text class="row-bulls-t">共{{item.totalBulls}}🐂</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- Action Area -->
+  <view class="action-area">
+    <text class="action-msg">{{actionMsg}}</text>
+    <view class="action-btns">
+      <button wx:if="{{phase === 'pick' && selectedCard !== null}}" class="btn-confirm" bindtap="confirmPlay">出这张牌 ✔</button>
+      <button wx:if="{{phase === 'end'}}" class="btn-restart" bindtap="startGame">再来一局 🔄</button>
+    </view>
+  </view>
+
+  <!-- Hand Cards -->
+  <view class="section hand-section">
+    <view class="hand-header">
+      <text class="sec-title">🃏 你的手牌</text>
+      <text class="round-label">第{{round}}轮 · 剩余{{handData.length || 0}}张</text>
+    </view>
+    <scroll-view scroll-x class="hand-cards" enhanced show-scrollbar="{{false}}">
+      <view
+        wx:for="{{handData}}" wx:key="index"
+        class="card {{item.cls}}"
+        bindtap="onCardClick"
+        data-card="{{item.num}}"
+      >
+        <text class="c-num">{{item.num}}</text>
+        <text class="c-bull">{{item.bullsEmoji}}</text>
+      </view>
+    </scroll-view>
+  </view>
+
+  <!-- Log -->
+  <view class="log-section">
+    <scroll-view scroll-y class="log-scroll" enhanced show-scrollbar="{{false}}" scroll-top="{{logScrollTop}}">
+      <view wx:for="{{logs}}" wx:key="index" class="log-entry {{item.cls}}">
+        <text>{{item.msg}}</text>
+      </view>
+    </scroll-view>
+  </view>
+
+</block>
+
+<!-- ==================== ROW PICK MODAL ==================== -->
+<view wx:if="{{showRowModal}}" class="modal-mask" catchtap="">
+  <view class="modal-box">
+    <text class="modal-title">😱 你的牌最小！</text>
+    <text class="modal-desc">你的牌比所有列末尾都小，必须选一列收走</text>
+
+    <view class="row-choices">
+      <view wx:for="{{rowData}}" wx:key="index" class="choice-btn" bindtap="humanChooseRow" data-row="{{item.index}}">
+        <view class="choice-info">
+          <text class="choice-label">第{{item.label}}列（罚分：{{item.totalBulls}}🐂）</text>
+          <view class="choice-cards">
+            <block wx:for="{{item.cards}}" wx:for-item="mc" wx:key="index">
+              <view class="mini-card"><text>{{mc.num}}</text></view>
+            </block>
+          </view>
+        </view>
+        <text class="choice-arrow">→ 收走</text>
+      </view>
+    </view>
+  </view>
+</view>
+
+<!-- ==================== END MODAL ==================== -->
+<view wx:if="{{showEndModal}}" class="modal-mask" catchtap="">
+  <view class="modal-box">
+    <text class="modal-title">{{endTitle}}</text>
+    <text class="modal-desc">{{endDesc}}</text>
+
+    <view class="ranking-list">
+      <view wx:for="{{endRanking}}" wx:key="index"
+        class="rank-row {{index === 0 ? 'winner' : ''}} {{item.isYou ? 'you-row' : ''}}"
+      >
+        <text>{{item.medal}} {{item.name}}{{item.isYou ? '(你)' : ''}}</text>
+        <text>{{item.score}}🐂</text>
+      </view>
+    </view>
+
+    <button class="btn-restart" bindtap="startGame">再来一局 🔄</button>
+  </view>
+</view>
+

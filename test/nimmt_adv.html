@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎮 牛头王 - 多人对战 | 6 Nimmt! Multiplayer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    background: #1a1a2e;
+    color: #eee;
+    min-height: 100vh;
+  }
+  #app { max-width: 1100px; margin: 0 auto; padding: 16px; }
+
+  h1 {
+    text-align: center;
+    font-size: 2rem;
+    margin-bottom: 6px;
+    background: linear-gradient(135deg, #4cc9f0, #4361ee);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .subtitle { text-align: center; color: #aaa; font-size: 0.85rem; margin-bottom: 16px; }
+
+  /* ===== Server Status ===== */
+  .server-bar { text-align: center; margin-bottom: 12px; }
+  .server-status { display: inline-flex; align-items: center; gap: 6px;
+    font-size: 0.8rem; color: #888; padding: 4px 12px; border-radius: 20px;
+    background: #16213e; border: 1px solid #0f3460; }
+  .server-status.ok { border-color: #2ecc71; color: #2ecc71; }
+  .server-status.bad { border-color: #e74c3c; color: #e74c3c; }
+
+  /* ===== Lobby ===== */
+  #lobby-screen { text-align: center; padding: 40px 20px; }
+  #lobby-screen h1 { font-size: 2.8rem; margin-bottom: 10px;
+    background: linear-gradient(135deg, #4cc9f0, #4361ee);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .lobby-box {
+    background: #16213e; border: 1px solid #0f3460;
+    border-radius: 14px; padding: 28px; max-width: 420px; margin: 20px auto;
+  }
+  .form-item { margin-bottom: 16px; text-align: left; }
+  .form-label { display: block; font-size: 0.82rem; color: #aaa; margin-bottom: 6px; }
+  .form-input {
+    width: 100%; padding: 10px 14px; border-radius: 8px;
+    border: 1px solid #0f3460; background: #0a0a1a; color: #eee;
+    font-size: 1rem; outline: none; transition: border-color 0.2s;
+  }
+  .form-input:focus { border-color: #4cc9f0; }
+
+  .btn-row { display: flex; gap: 10px; flex-direction: column; }
+  .divider { display: flex; align-items: center; gap: 12px; margin: 18px 0; color: #555; font-size: 0.82rem; }
+  .divider::before, .divider::after { content:''; flex:1; height:1px; background:#333; }
+
+  /* ===== Waiting Room ===== */
+  #waiting-screen { max-width: 500px; margin: 0 auto; }
+  .room-header { text-align: center; margin-bottom: 20px; }
+  .room-header h2 { font-size: 1.5rem; margin-bottom: 4px; }
+  .room-id-badge { display: inline-block; background: #16213e; border: 1px solid #4361ee;
+    border-radius: 20px; padding: 4px 16px; font-size: 0.9rem; color: #4cc9f0; font-family: monospace; letter-spacing: 2px; }
+  .players-list { background: #16213e; border: 1px solid #0f3460; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .sec-title { font-size: 0.85rem; color: #aaa; margin-bottom: 10px; }
+  .player-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 12px; border-radius: 8px; margin-bottom: 4px;
+    background: #0a0a1a; font-size: 0.9rem;
+  }
+  .player-item.host { border-left: 3px solid #f9c74f; }
+  .p-tag { font-size: 0.75rem; color: #888; }
+  .waiting-actions { display: flex; gap: 10px; justify-content: center; }
+
+  /* ===== Scoreboard ===== */
+  #scoreboard { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 16px; }
+  .score-card {
+    background: #16213e; border: 1px solid #0f3460; border-radius: 10px;
+    padding: 8px 14px; min-width: 80px; text-align: center; transition: border-color 0.3s;
+  }
+  .score-card.human { border-color: #f9c74f; background: #1a1a2e; }
+  .score-card.danger .pts { color: #f3722c; }
+  .score-card .name { font-size: 0.8rem; color: #aaa; }
+  .score-card .pts { font-size: 1.4rem; font-weight: bold; }
+  .score-card.human .pts { color: #f9c74f; }
+
+  /* ===== Table Rows ===== */
+  #rows-section { margin-bottom: 16px; }
+  .section-title { font-size: 0.85rem; color: #aaa; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .rows-grid { display: flex; flex-direction: column; gap: 8px; }
+  .row-wrap {
+    display: flex; align-items: center; gap: 8px;
+    background: #16213e; border: 1px solid #0f3460; border-radius: 10px;
+    padding: 10px 12px; transition: border-color 0.3s;
+  }
+  .row-wrap.full { border-color: #f3722c; }
+  .row-label { color: #aaa; font-size: 0.8rem; min-width: 30px; }
+  .row-cards { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+  .slots { display: flex; gap: 4px; margin-left: auto; }
+  .slot { width: 12px; height: 12px; border-radius: 3px; background: #0f3460; }
+  .slot.filled { background: #4cc9f0; }
+
+  /* ===== Cards ===== */
+  .card {
+    display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+    width: 52px; height: 68px; border-radius: 8px;
+    border: 2px solid #333; background: #fff; color: #222;
+    font-weight: bold; cursor: default; user-select: none;
+    transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+    position: relative; font-size: 1.1rem;
+  }
+  .card .num { line-height: 1; }
+  .card .bulls { font-size: 0.65rem; line-height: 1; margin-top: 2px; color: #c0392b; }
+  .card.b1 { background: #fff; }
+  .card.b2 { background: #fef9e7; border-color: #f39c12; }
+  .card.b3 { background: #fef3e2; border-color: #e67e22; }
+  .card.b5 { background: #fde8d8; border-color: #e74c3c; }
+  .card.b7 { background: #fdecec; border-color: #c0392b; color: #c0392b; }
+  .card.selectable { cursor: pointer; border-color: #4cc9f0; }
+  .card.selectable:hover { transform: translateY(-8px); box-shadow: 0 8px 20px rgba(76,201,240,0.4); z-index: 10; }
+  .card.selected { transform: translateY(-10px); box-shadow: 0 8px 24px rgba(249,199,79,0.6); border-color: #f9c74f !important; background: #fffbe6; z-index: 20; }
+
+  /* ===== Hand ===== */
+  #hand-section { margin-bottom: 16px; }
+  #hand-cards { display: flex; flex-wrap: wrap; gap: 8px; min-height: 80px; align-items: flex-end; }
+
+  /* ===== Buttons ===== */
+  .btn {
+    padding: 10px 24px; border: none; border-radius: 8px;
+    font-size: 1rem; font-weight: bold; cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+  .btn:hover { opacity: 0.85; transform: scale(1.02); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn-primary { background: linear-gradient(135deg, #4cc9f0, #4361ee); color: #fff; }
+  .btn-warning { background: linear-gradient(135deg, #f9c74f, #f3722c); color: #fff; }
+  .btn-danger { background: linear-gradient(135deg, #f3722c, #c0392b); color: #fff; }
+  .btn-gray { background: #2a2a4a; color: #aaa; border: 1px solid #444; }
+  .btn-create { width: 100%; padding: 14px; font-size: 1.05rem; margin-bottom: 10px; }
+  .btn-join { width: 100%; padding: 14px; font-size: 1.05rem; }
+  .btn-start-game { padding: 12px 32px; font-size: 1.05rem; }
+  .btn-leave { padding: 10px 24px; }
+
+  /* ===== Action Area ===== */
+  #action-area {
+    background: #16213e; border: 1px solid #0f3460; border-radius: 12px;
+    padding: 16px; margin-bottom: 16px; min-height: 80px;
+  }
+  #action-msg { font-size: 1rem; margin-bottom: 12px; line-height: 1.6; }
+  #action-btns { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  /* ===== Log ===== */
+  #log-section {
+    background: #16213e; border: 1px solid #0f3460; border-radius: 10px;
+    padding: 12px; max-height: 220px; overflow-y: auto;
+  }
+  .log-entry { font-size: 0.82rem; color: #ccc; padding: 2px 0; border-bottom: 1px solid #0f3460; }
+  .log-entry:last-child { border-bottom: none; }
+  .log-entry.penalty { color: #f3722c; }
+  .log-entry.you { color: #f9c74f; }
+  .log-entry.system { color: #4cc9f0; }
+
+  /* ===== Modals ===== */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+    display: flex; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal {
+    background: #1a1a2e; border: 1px solid #0f3460; border-radius: 16px;
+    padding: 28px; max-width: 480px; width: 90%; text-align: center;
+  }
+  .modal h2 { font-size: 1.5rem; margin-bottom: 12px; }
+  .modal p { color: #aaa; margin-bottom: 16px; line-height: 1.6; font-size: 0.9rem; }
+  .ranking-list { text-align: left; margin-bottom: 16px; }
+  .ranking-row {
+    display: flex; justify-content: space-between;
+    padding: 6px 10px; border-radius: 6px; margin-bottom: 4px;
+    background: #16213e;
+  }
+  .ranking-row.winner { background: #2a2a0e; border: 1px solid #f9c74f; }
+  .ranking-row.you-row { border: 1px solid #4cc9f0; }
+
+  /* Row pick modal */
+  .row-choices { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  .row-choice-btn {
+    display: flex; justify-content: space-between; align-items: center;
+    background: #16213e; border: 1px solid #0f3460; border-radius: 8px;
+    padding: 10px 14px; cursor: pointer; transition: border-color 0.2s, background 0.2s;
+  }
+  .row-choice-btn:hover { border-color: #f3722c; background: #1e1e3e; }
+  .row-choice-cards { display: flex; gap: 4px; }
+  .mini-card {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 40px; border-radius: 5px; border: 1.5px solid #444;
+    background: #fff; color: #222; font-size: 0.7rem; font-weight: bold;
+  }
+
+  /* ===== Player Config ===== */
+  .player-config {
+    background: #0f1a30; border: 1px solid #0f3460; border-radius: 10px;
+    padding: 14px; margin-bottom: 16px;
+  }
+  .config-row {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px;
+  }
+  .config-label { font-size: 0.9rem; color: #ccc; }
+  .number-input { display: flex; align-items: center; gap: 0; }
+  .number-input input {
+    width: 48px; text-align: center; border: 1px solid #0f3460;
+    background: #0a0a1a; color: #eee; font-size: 1.1rem; font-weight: bold;
+    padding: 6px 4px; outline: none; border-radius: 0;
+  }
+  .number-input input:focus { border-color: #4cc9f0; }
+  .number-input input::-webkit-inner-spin-button,
+  .number-input input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .number-input input[type=number] { -moz-appearance: textfield; }
+  .num-btn {
+    width: 34px; height: 36px; border: 1px solid #0f3460;
+    background: #16213e; color: #eee; font-size: 1.2rem; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.2s;
+  }
+  .num-btn:hover { background: #1a2a4e; }
+  .num-btn:first-child { border-radius: 6px 0 0 6px; }
+  .num-btn:last-child { border-radius: 0 6px 6px 0; }
+  .config-total {
+    text-align: center; font-size: 0.85rem; color: #aaa;
+    padding-top: 6px; border-top: 1px solid #0f3460;
+  }
+  .config-total.error { color: #e74c3c; }
+
+  /* ===== Waiting Info ===== */
+  .waiting-info {
+    text-align: center; font-size: 0.9rem; color: #f9c74f;
+    padding: 10px; margin-bottom: 12px;
+    background: #1a1a0e; border: 1px solid #2a2a0e; border-radius: 8px;
+  }
+  .waiting-info.full { color: #2ecc71; background: #0e1a0e; border-color: #1a2a1a; }
+
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .fade-in { animation: fadeIn 0.3s ease; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ===== LOBBY ===== -->
+  <div id="lobbyScreen">
+    <h1>🎮 牛头王 · 多人对战</h1>
+    <p class="subtitle">6 Nimmt! Multiplayer · Real-time</p>
+
+    <div class="lobby-box">
+      <div class="form-item">
+        <label class="form-label">👤 你的昵称</label>
+        <input class="form-input" id="myNameInput" placeholder="取个好听的名字吧" maxlength="12" autofocus />
+      </div>
+
+      <div class="player-config">
+        <div class="config-row">
+          <label class="config-label">👤 实际玩家</label>
+          <div class="number-input">
+            <button class="num-btn" onclick="adjustNum('numHumans',-1)">−</button>
+            <input type="number" id="numHumans" value="2" min="1" max="6" />
+            <button class="num-btn" onclick="adjustNum('numHumans',1)">+</button>
+          </div>
+        </div>
+        <div class="config-row">
+          <label class="config-label">🤖 AI 玩家</label>
+          <div class="number-input">
+            <button class="num-btn" onclick="adjustNum('numAI',-1)">−</button>
+            <input type="number" id="numAI" value="2" min="0" max="5" />
+            <button class="num-btn" onclick="adjustNum('numAI',1)">+</button>
+          </div>
+        </div>
+        <div class="config-total">总计：<span id="totalPlayers">4</span> 人（2~6人游戏）</div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary btn-create" onclick="createRoom()">🏠 创建房间</button>
+      </div>
+
+      <div class="divider"><span>或加入已有房间</span></div>
+
+      <div class="form-item">
+        <label class="form-label">🎫 房间号</label>
+        <input class="form-input" id="roomIdInput" placeholder="先输入上方昵称哦" maxlength="6" />
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-warning btn-join" onclick="joinRoom()">🚪 加入房间</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== WAITING ROOM ===== -->
+  <div id="waitingScreen" style="display:none">
+    <div class="room-header">
+      <h2>🏠 等待室</h2>
+      <div class="room-id-badge" id="roomIdDisplay">------</div>
+      <div style="margin-top:6px;">
+        <span class="server-status ok" id="wsStatus"><span>🟢 已连接</span></span>
+      </div>
+    </div>
+
+    <div class="players-list">
+      <div class="sec-title">👥 玩家列表 (<span id="playerCount">1</span>/<span id="playerMax">4</span>)</div>
+      <div id="playersListEl"></div>
+    </div>
+
+    <div class="waiting-info" id="waitingInfo"></div>
+
+    <div class="waiting-actions">
+      <button class="btn btn-primary btn-start-game" id="startGameBtn" onclick="startGame()" style="display:none;">▶️ 开始游戏</button>
+      <button class="btn btn-gray btn-leave" onclick="leaveRoom()">🚪 离开房间</button>
+    </div>
+  </div>
+
+  <!-- ===== GAME SCREEN (hidden initially) ===== -->
+  <div id="gameScreen" style="display:none">
+    <h1>🎮 牛头王 · 多人</h1>
+
+    <div id="scoreboard"></div>
+
+    <div id="rows-section">
+      <div class="section-title">📋 牌桌 <span style="margin-left:auto;color:#555;font-size:0.78rem">第 <span id="roundLabel">1</span> 轮</span></div>
+      <div id="rowsGrid" class="rows-grid"></div>
+    </div>
+
+    <div id="action-area">
+      <div id="actionMsg"></div>
+      <div id="actionBtns"></div>
+    </div>
+
+    <div id="hand-section">
+      <div class="section-title">🃏 你的手牌 <span id="handCount" style="margin-left:auto;color:#888;"></span></div>
+      <div id="handCards"></div>
+    </div>
+
+    <div id="log-section"></div>
+
+    <button class="btn btn-gray" style="margin-top:12px;width:100%;" onclick="leaveRoom()">🚪 离开游戏</button>
+  </div>
+</div>
+
+<!-- Row Pick Modal -->
+<div id="rowModal" class="modal-overlay" style="display:none">
+  <div class="modal">
+    <h2>😱 你的牌最小！</h2>
+    <p>你的牌比所有列末尾都小，必须选一列收走（你将获得该列的牛头罚分）</p>
+    <div id="rowChoices" class="row-choices"></div>
+  </div>
+</div>
+
+<!-- End Modal -->
+<div id="endModal" class="modal-overlay" style="display:none">
+  <div class="modal">
+    <h2 id="endTitle"></h2>
+    <p id="endDesc"></p>
+    <div id="endRanking" class="ranking-list"></div>
+    <button class="btn btn-warning" onclick="retryGame()">再来一局 🔄</button>
+    <button class="btn btn-gray" style="margin-top:8px;" onclick="backToLobby()">返回大厅 🏠</button>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  Config
+// ============================================================
+const MULTI_SERVER = "";   // PHP 后端，同源（相对路径）
+const API_BASE = "/nimmt_api/nimmt_multi.php";  // PHP API 入口
+let pollTs = 0;   // long poll timestamp
+let polling = false;
+
+const TOTAL = 100, NUM_ROWS = 5, MAX_ROW = 6, HAND_SIZE = 10, END_SCORE = 66;
+
+function getBulls(c) { if(c===55)return 7; if(c%11===0)return 5; if(c%10===0)return 3; if(c%5===0)return 2; return 1; }
+function bullsStr(n) { return "\uD83D\uDC02".repeat(n); }
+function rowBulls(row) { return row.reduce((s,c)=>s+getBulls(c),0); }
+
+function cardHTML(card, cls="", onclick="") {
+  const b=getBulls(card), bc="b"+b;
+  const click=onclick?` onclick="${onclick}"`:"";
+  return `<div class="card ${bc} ${cls}"${click}><span class="num">${card}</span><span class="bulls">${bullsStr(b)}</span></div>`;
+}
+function miniCardHTML(card) {
+  const b=getBulls(card);
+  return `<div class="mini-card" style="border:${b>=5?'#e74c3c':b>=3?'#e67e22':b>=2?'#f39c12':'#aaa'}">${card}</div>`;
+}
+
+// ============================================================
+//  State
+// ============================================================
+let state = {
+  phase: "lobby",          // lobby | waiting | playing | pick_row | finished
+  playerId: "",
+  myName: "",
+  roomId: "",
+  players: [],             // [{id, name, is_ai}]
+  isHost: false,
+  hand: [],
+  rows: [],
+  scores: {},              // playerId -> score
+  round: 1,
+  selectedCard: null,
+  logs: [],
+  numHumans: 2,            // 房间需要的实际玩家数
+  numAI: 2                 // 房间的AI玩家数
+};
+
+let ws = null;
+
+
+// ============================================================
+//  Server Health Check
+// ============================================================
+async function checkServerHealth() {
+  var el = document.getElementById("srvStatus");
+  var icon = document.getElementById("srvIcon");
+  var txt = document.getElementById("srvText");
+  try {
+    var controller = new AbortController();
+    var timer = setTimeout(function(){ controller.abort(); }, 8000);
+    const res = await fetch(API_BASE + "?action=room_info&room_id=_health_", { signal: controller.signal });
+    clearTimeout(timer);
+    if (res.ok) {
+      // Server responded - it's online regardless of room existence
+      el.className = "server-status ok";
+      icon.textContent = "✅";
+      txt.textContent = "Server 在线 (PHP)";
+    } else {
+      throw new Error("HTTP " + res.status);
+    }
+  } catch(e) {
+    var msg = e.message || "";
+    // Don't show "Room not found" as offline - server is actually working
+    if (msg.indexOf("Room not found") !== -1 || msg.indexOf("Aborted") !== -1) {
+      el.className = "server-status ok";
+      icon.textContent = "✅";
+      txt.textContent = "Server 在线 (PHP)";
+    } else {
+      el.className = "server-status bad";
+      icon.textContent = "❌";
+      txt.textContent = "Server 离线 (" + msg + ")";
+    }
+  }
+}
+
+// ============================================================
+//  Screen Switching
+// ============================================================
+function showScreen(name) {
+  document.getElementById("lobbyScreen").style.display = name==="lobby"?"block":"none";
+  document.getElementById("waitingScreen").style.display = name==="waiting"?"block":"none";
+  document.getElementById("gameScreen").style.display = name.startsWith("play")?"block":"none";
+}
+
+
+// ============================================================
+//  Lobby Actions
+// ============================================================
+
+function adjustNum(id, delta) {
+  var el = document.getElementById(id);
+  var v = parseInt(el.value) + delta;
+  var min = parseInt(el.min);
+  var max = parseInt(el.max);
+  el.value = Math.max(min, Math.min(max, v));
+  updateTotalPlayers();
+}
+
+function updateTotalPlayers() {
+  var h = parseInt(document.getElementById('numHumans').value) || 1;
+  var a = parseInt(document.getElementById('numAI').value) || 0;
+  var total = h + a;
+  var el = document.getElementById('totalPlayers');
+  el.textContent = total;
+  el.parentElement.className = (total < 2 || total > 6) ? 'config-total error' : 'config-total';
+}
+
+function createRoom() {
+  var nameInput = document.getElementById("myNameInput");
+  var myName = (nameInput.value || "").trim();
+  if (!myName) {
+    nameInput.focus();
+    nameInput.style.borderColor = "#f9c74f";
+    nameInput.placeholder = "⚠️ 请先输入昵称！";
+    return;
+  }
+  // Reset border color on input
+  nameInput.style.borderColor = "";
+  var numHumans = parseInt(document.getElementById('numHumans').value) || 2;
+  var numAI = parseInt(document.getElementById('numAI').value) || 0;
+  if (numHumans + numAI < 2 || numHumans + numAI > 6) {
+    alert('总人数需在2~6之间'); return;
+  }
+  state.myName = document.getElementById("myNameInput").value.trim() || ("Player"+Math.floor(Math.random()*1000));
+  state.playerId = 'p' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  state.numHumans = numHumans;
+  state.numAI = numAI;
+
+  fetch(API_BASE, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ action: "create_room", player_id: state.playerId, player_name: state.myName, num_humans: numHumans, num_ai: numAI })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) { alert('创建失败: ' + data.error); return; }
+    state.roomId = data.room_id;
+    state.players = data.players;
+    state.isHost = true;
+    showWaiting();
+    startPolling();
+  })
+  .catch(err => {
+    alert("创建失败: " + err.message);
+  });
+}
+
+function joinRoom() {
+  var nameInput = document.getElementById("myNameInput");
+  var rid = document.getElementById("roomIdInput").value.trim();
+  var myName = (nameInput.value || "").trim();
+
+  // If no name entered, focus on name input first
+  if (!myName) {
+    nameInput.focus();
+    nameInput.style.borderColor = "#f9c74f";
+    nameInput.placeholder = "⚠️ 请先输入昵称！";
+    return;
+  }
+
+  if (!rid) {
+    document.getElementById("roomIdInput").focus();
+    document.getElementById("roomIdInput").placeholder = "⚠️ 请输入房间号！";
+    return;
+  }
+  state.myName = myName || ("Player"+Math.floor(Math.random()*1000));
+  state.playerId = 'p' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+
+  fetch(API_BASE, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ action: "join_room", room_id: rid, player_id: state.playerId, player_name: state.myName })
+  })
+  .then(r => r.json())
+  .then(data => {
+    state.roomId = data.room_id;
+    state.players = data.players;
+    state.isHost = false;
+    showWaiting();
+    startPolling();
+  })
+  .catch(err => {
+    alert("加入失败: " + err.message);
+  });
+}
+
+
+// ============================================================
+//  Waiting Room UI
+// ============================================================
+
+function showWaiting() {
+  showScreen("waiting");
+  document.getElementById("roomIdDisplay").textContent = state.roomId;
+  renderPlayersList();
+  renderWaitingInfo();
+  // 房主可以手动开始（也可以等满自动开始）
+  var btn = document.getElementById("startGameBtn");
+  if (state.isHost) {
+    var realCount = state.players.filter(function(p){return !p.is_ai;}).length;
+    btn.style.display = realCount >= 2 ? "" : "none";
+  } else {
+    btn.style.display = "none";
+  }
+}
+
+function renderWaitingInfo() {
+  var el = document.getElementById('waitingInfo');
+  if (!el) return;
+  var realCount = state.players.filter(function(p){return !p.is_ai;}).length;
+  var aiCount = state.players.filter(function(p){return p.is_ai;}).length;
+  var maxP = document.getElementById('playerMax');
+  if (maxP) maxP.textContent = state.numHumans;
+  if (realCount < state.numHumans) {
+    el.className = 'waiting-info';
+    el.innerHTML = '⏳ 等待实际玩家加入... (' + realCount + '/' + state.numHumans + ') 🤖AI: ' + aiCount + '人已就位';
+  } else {
+    el.className = 'waiting-info full';
+    el.innerHTML = '✅ 人已到齐！(' + realCount + '人 + ' + aiCount + '🤖) 即将自动开始...';
+  }
+}
+
+function renderPlayersList() {
+  var el = document.getElementById("playersListEl");
+  var realCount = state.players.filter(function(p){return !p.is_ai;}).length;
+  document.getElementById("playerCount").textContent = realCount;
+  el.innerHTML = state.players.map(function(p) {
+    var isMe = p.id === state.playerId;
+    var isHost = state.players.length > 0 && p.id === state.players[0].id;
+    return '<div class="player-item ' + (isHost ? 'host' : '') + '">' +
+      '<span>' + (p.name || p.id) + (isMe ? ' (你)' : '') + (p.is_ai ? ' 🤖' : '') + '</span>' +
+      '<span class="p-tag">' + (isHost ? '👑 房主' : '') + '</span>' +
+    '</div>';
+  }).join("");
+  renderWaitingInfo();
+}
+
+
+// ============================================================
+//  Long Polling (replaces WebSocket)
+// ============================================================
+
+function startPolling() {
+  if (polling || !state.roomId) return;
+  polling = true;
+  pollLoop();
+}
+
+function stopPolling() {
+  polling = false;
+}
+
+function pollLoop() {
+  if (!polling || !state.roomId) return;
+
+  var url = API_BASE + "?action=poll&room_id=" + state.roomId + "&player_id=" + state.playerId + "&since=" + pollTs;
+
+  fetch(url, { signal: AbortController.signal })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.messages && data.messages.length > 0) {
+        if (data.ts) pollTs = data.ts;
+        for (var i = 0; i < data.messages.length; i++) {
+          handleServerMessage(data.messages[i]);
+        }
+      }
+      if (polling) setTimeout(pollLoop, 200);
+    })
+    .catch(function(err) {
+      console.error("[Poll] error:", err);
+      if (polling) setTimeout(pollLoop, 2000);
+    });
+}
+
+function sendToServer(msg) {
+  fetch(API_BASE, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ action: "send", type: msg.type, room_id: state.roomId, player_id: state.playerId, card: msg.card, row: msg.row })
+  }).catch(function(e){ console.error("[Send] error:", e); });
+}
+
+function updateWSStatus(ok) {
+  var el = document.getElementById("wsStatus");
+  if (!el) return;
+  el.className = "server-status " + (ok ? "ok" : "bad");
+  el.innerHTML = ok ? "<span>\uD83D\uDFE2 Connected</span>" : "<span>\uD83D\uDD34 Disconnected</span>";
+}
+
+
+// ============================================================
+//  Handle Server Messages
+// ============================================================
+
+function handleServerMessage(msg) {
+  console.log("[WS] recv:", msg.type);
+
+  switch(msg.type) {
+
+    case "room_joined":
+      state.roomId = msg.room_id;
+      state.players = msg.players || [];
+      state.phase = msg.phase || "waiting";
+      if (msg.num_humans) state.numHumans = msg.num_humans;
+      if (msg.num_ai) state.numAI = msg.num_ai;
+      renderPlayersList();
+      break;
+
+    case "player_joined":
+      state.players = msg.players || [];
+      if (msg.num_humans) state.numHumans = msg.num_humans;
+      if (msg.num_ai) state.numAI = msg.num_ai;
+      renderPlayersList();
+      addLog((msg.name || "玩家") + " 加入了房间!", "system");
+      // 房主：人数到齐时更新按钮状态
+      if (state.isHost) {
+        var realCount = state.players.filter(function(p){return !p.is_ai;}).length;
+        document.getElementById("startGameBtn").style.display = realCount >= 2 ? "" : "none";
+      }
+      break;
+
+    case "player_left":
+      state.players = state.players.filter(p => p.id !== msg.player_id);
+      renderPlayersList();
+      break;
+
+    case "error":
+      alert("错误: " + (msg.detail || "Unknown"));
+      break;
+
+    case "pong":
+      break;
+
+    // ---- Game events below ----
+
+    case "game_start":
+      state.phase = "playing";
+      state.hand = msg.hand || [];
+      state.rows = msg.rows || [];
+      state.round = msg.round || 1;
+      state.scores = {};
+      state.selectedCard = null;
+      state.logs = [{msg:"\uD83C\uDFAE Game started!", cls:"system"}];
+      console.log("[DEBUG] game_start: hand=", JSON.stringify(state.hand), "rows=", JSON.stringify(state.rows));
+      // Update players list from server (includes all players with correct order)
+      if (msg.players) {
+        state.players = msg.players.map(function(p) { return {id: p.id, name: p.name, is_ai: p.is_ai}; });
+        for (var i = 0; i < msg.players.length; i++) { state.scores[msg.players[i].id] = msg.players[i].score || 0; }
+      }
+      showScreen("playing");
+      renderAll();
+      break;
+
+    case "game_started":
+      // Broadcast notification, host already got game_start
+      break;
+
+    case "card_played":
+      setActionMsg("\u23F3 玩家出牌中... (剩余 " + msg.remaining + ")");
+      break;
+
+    case "must_pick_row":
+      state.phase = "pick_row";
+      state.choosingForCard = msg.card;
+      state.rows = msg.rows || state.rows;
+      setActionMsg("\u1F631 你的牌最小，请选择收走的列！");
+      showRowModal();
+      renderRows();
+      break;
+
+    case "round_end":
+      state.round = msg.round;
+      state.rows = msg.rows || [];
+      state.scores = msg.scores || state.scores;
+      state.logs = (msg.logs || []).slice(0, 60);
+      state.phase = "playing";
+      state.selectedCard = null;
+      setActionMsg("\uD83C\uDCAF 第 " + msg.round + " 轮 \u2014 点击你的牌出牌");
+      renderAll();
+      break;
+
+    case "row_picked":
+      hideRowModal();
+      state.rows = msg.rows || [];
+      state.scores = msg.scores || state.scores;
+      state.phase = "playing";
+      renderAll();
+      break;
+
+    case "game_over":
+      state.phase = "finished";
+      state.logs = (msg.logs || []).slice(0, 60);
+      showEndModal(msg.ranking || []);
+      setActionMsg("\uD83C\uDFC6 Game Over!");
+      break;
+  }
+}
+
+
+// ============================================================
+//  Game Actions (send to server via WS)
+// ============================================================
+
+function startGame() {
+  if (!state.isHost) return;
+  sendToServer({ type: 'start_game' });
+}
+
+function leaveRoom() {
+  stopPolling();
+  state = { phase: "lobby", playerId: "", myName: "", roomId: "", players: [], isHost: false, hand: [], rows: [], scores: {}, round: 1, selectedCard: null, logs: [] };
+  showScreen("lobby");
+}
+
+function confirmPlay() {
+  var card = state.selectedCard;
+  if (!card) return;
+
+  sendToServer({ type: "play_card", card: card });
+
+  // Optimistic local update
+  var idx = state.hand.indexOf(card);
+  if (idx !== -1) state.hand.splice(idx, 1);
+  addLog("你打出 " + card + " (" + bullsStr(getBulls(card)) + ")", "you");
+  state.selectedCard = null;
+  setActionMsg("\u23F3 等待其他玩家...");
+  renderHand();
+  renderAction();
+}
+
+function humanChooseRow(r) {
+  hideRowModal();
+  var card = state.choosingForCard;
+  sendToServer({ type: "pick_row", row: r, card: card });
+  setActionMsg("\u23F3 结算中...");
+}
+
+function retryGame() {
+  hideEndModal();
+  if (state.isHost) startGame();
+}
+
+function backToLobby() {
+  hideEndModal();
+  leaveRoom();
+}
+
+
+// ============================================================
+//  Card Click (local only)
+// ============================================================
+
+window.onCardClick = function(card) {
+  if (state.phase !== "playing") return;
+  state.selectedCard = card;
+  renderHand();
+  renderAction();
+};
+
+
+// ============================================================
+//  Rendering
+// ============================================================
+
+function renderAll() {
+  console.log("[DEBUG] renderAll: phase=", state.phase, "handLen=", state.hand ? state.hand.length : "null", "rowsLen=", state.rows ? state.rows.length : "null");
+  renderScoreboard(); renderRows(); renderHand(); renderAction(); renderLog();
+}
+
+function renderScoreboard() {
+  var el = document.getElementById("scoreboard");
+  if (!el) return;
+  el.innerHTML = state.players.map(function(p) {
+    var isMe = p.id === state.playerId;
+    var s = state.scores[p.id] || 0;
+    var isDanger = s >= END_SCORE * 0.7;
+    return '<div class="score-card ' + (isMe ? 'human' : '') + ' ' + (isDanger ? 'danger' : '') + '">' +
+      '<div class="name">' + (p.name || p.id) + (isMe ? '(你)' : '') + '</div>' +
+      '<div class="pts">' + s + ' \uD83D\uDC02</div></div>';
+  }).join("");
+}
+
+function renderRows() {
+  var el = document.getElementById("rowsGrid");
+  if (!el) return;
+  if (!state.rows || state.rows.length === 0) {
+    el.innerHTML = '<div style="color:#555;text-align:center;padding:20px;">牌桌为空</div>';
+    return;
+  }
+  el.innerHTML = state.rows.map(function(row, r) {
+    if (!row) row = [];
+    var isFull = row.length >= MAX_ROW;
+    var cards = row.map(function(c) { return cardHTML(c); }).join("");
+    var slotsHtml = '';
+    for (var i = 0; i < MAX_ROW; i++) {
+      slotsHtml += '<div class="slot ' + (i < row.length ? 'filled' : '') + '"></div>';
+    }
+    return '<div class="row-wrap ' + (isFull ? 'full' : '') + '">' +
+      '<div class="row-label">\u5217' + (r+1) + '</div>' +
+      '<div class="row-cards">' + cards + '</div>' +
+      '<div class="slots">' + slotsHtml + '</div></div>';
+  }).join("");
+}
+
+function renderHand() {
+  var el = document.getElementById("handCards");
+  console.log("[DEBUG] renderHand: el=", !!el, "hand=", JSON.stringify(state.hand), "phase=", state.phase);
+  if (!el || !state.hand) return;
+  el.innerHTML = state.hand.map(function(card) {
+    var isSelected = card === state.selectedCard;
+    var isPickPhase = state.phase === "playing";
+    var cls = isPickPhase ? (isSelected ? "selectable selected" : "selectable") : "";
+    var onclick = isPickPhase ? "onCardClick(" + card + ")" : "";
+    return cardHTML(card, cls, onclick);
+  }).join("");
+  var hc = document.getElementById("handCount");
+  if (hc) hc.textContent = "剩余 " + state.hand.length + " 张";
+}
+
+function renderAction() {
+  var msgEl = document.getElementById("actionMsg");
+  var btnsEl = document.getElementById("actionBtns");
+  if (!msgEl || !btnsEl) return;
+
+  if (state.phase === "playing") {
+    if (state.selectedCard) {
+      msgEl.innerHTML = '\u5df2\u9009\u62e9\uff1a' + cardHTML(state.selectedCard,"","") +
+        ' <span style="color:#aaa;font-size:0.85rem">\u70b9\u51fb\u5176\u4ed6\u724c\u91cd\u65b0\u9009\u62e9</span>';
+      btnsEl.innerHTML = '<button class="btn btn-primary" onclick="confirmPlay()\u3000">\u51fa\u8fd9\u5f20\u724c ✔</button>';
+    } else {
+      msgEl.innerHTML = '<span style="color:#aaa">\uD83D\uDC46 \u70b9\u51fb\u4f60\u7684\u624b\u724c\u9009\u4e00\u5f20\u51fa</span>';
+      btnsEl.innerHTML = "";
+    }
+  } else if (state.phase === "pick_row") {
+    msgEl.innerHTML = "\u1F631 \u4f60\u7684\u724c <b>" + (state.choosingForCard||"") + "</b> \u6700\u5c0f\uff0c\u8bf7\u9009\u62e9\u6536\u8d70\u7684\u5217";
+    btnsEl.innerHTML = "";
+  } else if (state.phase === "finished") {
+    msgEl.innerHTML = "\uD83C\uDFC6 Game Over!";
+    btnsEl.innerHTML = "";
+  }
+}
+
+function setActionMsg(html) {
+  var el = document.getElementById("actionMsg");
+  if (el) el.innerHTML = html;
+}
+
+function renderLog() {
+  var el = document.getElementById("log-section");
+  if (!el) return;
+  el.innerHTML = state.logs.map(function(entry) {
+    return '<div class="log-entry ' + (entry.cls||"") + '">' + entry.msg + '</div>';
+  }).join("");
+}
+
+function addLog(msg, cls) {
+  state.logs.unshift({msg: msg, cls: cls || ""});
+  if (state.logs.length > 60) state.logs.pop();
+  renderLog();
+}
+
+
+// ============================================================
+//  Modals
+// ============================================================
+
+function showRowModal() {
+  var el = document.getElementById("rowChoices");
+  el.innerHTML = state.rows.map(function(row, r) {
+    var b = rowBulls(row);
+    var cards = row.map(function(c) { return miniCardHTML(c); }).join("");
+    return '<div class="row-choice-btn" onclick="humanChooseRow(' + r + ')">' +
+      '<div><div style="font-size:0.8rem;color:#aaa;margin-bottom:4px">\u5217' + (r+1) + ' (\u7f5a\u5206\uff1a' + b + '\U0001f402)</div>' +
+      '<div class="row-choice-cards">' + cards + '</div></div>' +
+      '<div style="color:#f3722c;font-size:1.2rem">\u2192 \u6536\u8d70</div></div>';
+  }).join("");
+  document.getElementById("rowModal").style.display = "flex";
+}
+
+function hideRowModal() {
+  document.getElementById("rowModal").style.display = "none";
+}
+
+function showEndModal(ranking) {
+  var medals = ["\uD83E\uDD47","\uD83E\uDD48","\uD83E\uDD49","4️⃣","5️⃣","6️⃣"];
+  document.getElementById("endTitle").textContent = "\uD83C\uDFC6 Game Over!";
+  document.getElementById("endDesc").textContent = "";
+
+  var meIdx = ranking.findIndex(function(r) { return r.isYou; });
+  var desc = meIdx >= 0 ? ("\u4f60\u6392\u540d\u7B2C " + (meIdx+1)) : "";
+  document.getElementById("endDesc").textContent = desc;
+
+  document.getElementById("endRanking").innerHTML = ranking.map(function(info, i) {
+    return '<div class="ranking-row ' + (i===0?'winner':'') + ' ' + (info.isYou?'you-row':'') + '">' +
+      '<span>' + medals[i] + ' ' + info.name + (info.isYou?' (you)':'') + '</span>' +
+      '<span>' + info.score + ' \uD83D\uDC02</span></div>';
+  }).join("");
+  document.getElementById("endModal").style.display = "flex";
+}
+
+function hideEndModal() {
+  document.getElementById("endModal").style.display = "none";
+}
+
+
+// ============================================================
+//  Init
+// ============================================================
+checkServerHealth();
+</script>
+</body>
+</html>
+
