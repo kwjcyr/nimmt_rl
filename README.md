@@ -8,6 +8,7 @@
 
 ```
 nimmt/
+├── index.html               # 单机网页版（推荐，浏览器直接打开）
 ├── ql/
 │   └── nimmt_ql.py          # Q-Learning 强化学习训练 + 对战
 ├── dqn/
@@ -15,16 +16,24 @@ nimmt/
 ├── ppo/
 │   └── nimmt_ppo.py         # PPO（近端策略优化）训练 + 对战
 ├── interactive/
-│   ├── nimmt.html           # 网页版（推荐，浏览器直接打开）
 │   ├── nimmt.py             # 命令行版（1人类 + 5 规则AI）
 │   ├── nimmt_arena.py       # Arena 对战：真人 vs PPO/DQN/QL/规则AI
 │   └── nimmt_compare.py     # 三种 RL 一键训练 + 胜率对比
+├── server/
+│   └── nimmt_multi.php      # 多人在线对战后端（PHP Long Polling）
+├── test/
+│   ├── arena.html           # Arena 网页前端（Codelab 对战）
+│   ├── nimmt_adv.html       # 多人在线对战前端（支持人类 + AI 混合房间）
+│   ├── admin.html           # 房间管理后台页面
+│   └── test_model.py        # 模型加载验证脚本
+├── miniprogram/             # 微信小程序版
+│   ├── app.js / app.json / app.wxss
+│   ├── pages/index/         # 小程序首页
+│   └── project.config.json
 ├── models/
 │   ├── nimmt_q_table.pkl    # 训练好的 Q 表
 │   ├── nimmt_dqn_model.pth  # 训练好的 DQN 模型
 │   └── nimmt_ppo_model.pth  # 训练好的 PPO 模型
-├── test/
-│   └── test_model.py        # 模型加载验证脚本
 ├── requirements.txt         # Python 依赖
 └── README.md
 ```
@@ -64,9 +73,27 @@ nimmt/
 
 ## 🚀 快速开始
 
-### 方式一：网页版（最简单，推荐发给朋友）
+### 方式一：单机网页版（最简单，推荐发给朋友）
 
-直接双击打开 `interactive/nimmt.html`，或右键用浏览器打开。**无需安装任何东西！**
+直接双击打开 `index.html`，或右键用浏览器打开。**无需安装任何东西！**
+
+---
+
+### 方式一½：多人在线对战（kwjcyr.com 部署版）
+
+访问 **http://kwjcyr.com/nimmt_adv** 即可体验多人在线对战：
+
+- 创建房间时可自定义**人类玩家数 + AI 玩家数**
+- 所有人类玩家加入后**自动开始游戏**
+- 支持并发操作，含行选择（pick_row）的**并发安全机制**
+- 房间数据持久化存储，支持**自动清理过期房间**
+- 后端基于 **PHP Long Polling** 实现，兼容 PHP 5.3+
+
+技术架构：
+- 前端：`test/nimmt_adv.html`（纯 HTML/CSS/JS，Long Polling 通信）
+- 后端：`server/nimmt_multi.php`（PHP，房间管理 / 游戏逻辑 / AI 策略）
+- 管理：`test/admin.html`（查看活跃房间 / 手动清理）
+- 部署地址：`http://kwjcyr.com/nimmt_adv`
 
 ---
 
@@ -393,7 +420,8 @@ pip install -r requirements.txt
 
 | 模块 | 依赖 |
 |------|------|
-| `interactive/nimmt.html` | 无（浏览器直接打开） |
+| `index.html`（单机网页版） | 无（浏览器直接打开） |
+| `test/nimmt_adv.html`（多人在线版） | PHP 5.3+ 后端 + 浏览器 |
 | `interactive/nimmt.py` + `ql/` | Python 3.8+ 标准库 |
 | `dqn/` + `ppo/` + `interactive/nimmt_arena.py` | `torch>=2.0` + `numpy>=1.24` |
 
