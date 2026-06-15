@@ -1,14 +1,9 @@
 <?php
 /**
- * Nimmt! Multi-user Server - Fixed version (Async row pick fixed)
+ * Nimmt! Multi-user Server - PHP 5.3 Compatible
+ * Supports: num_humans (actual players needed) + num_ai (AI players)
+ * Auto-starts game when all humans have joined
  *
- * Changes:
- * - Round processing is now step-by-step with pending_pick state for humans
- * - Cards are processed in sorted order, waiting for human row picks
- * - Fixed variable undefined bugs
- * - AI hands not exposed to humans
- *
- * MAX_ROW can be set to 5 or 6 (original code used 6)
  */
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
@@ -19,14 +14,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') exit(0);
 
 $DATA_DIR = '/opt/nimmt/data/';
 $POLL_TIMEOUT = 25;
-$ROOM_TTL = 1800; // 30 minutes
+$ROOM_TTL = 1800; // 30 minutes - delete rooms inactive for this long
 @mkdir($DATA_DIR, 0777, true);
 
-define('MAX_ROW', 6);          // You can change to 5 if you prefer standard rule
+define('MAX_ROW', 6);
 define('END_SCORE', 66);
 
 // ============================================================
-// Helper functions
+// Room cleanup (remove stale rooms)
 // ============================================================
 function cleanupStaleRooms() {
     global $DATA_DIR, $ROOM_TTL;
@@ -42,12 +37,19 @@ function cleanupStaleRooms() {
     return $removed;
 }
 
+// Auto-cleanup on some requests (not all to avoid overhead)
+if (in_array($action, array('create_room', 'join_room', 'poll'))) {
+    // Cleanup roughly every 5 minutes (random chance)
+    if (mt_rand(1, 100) <= 5) cleanupStaleRooms();
+}
+
 function getDataFile($rid) {
     global $DATA_DIR;
     return $DATA_DIR . 'room_' . preg_replace('/[^a-zA-Z0-9]/', '', $rid) . '.json';
 }
 function readRoom($rid) { $f = getDataFile($rid); return file_exists($f) ? json_decode(file_get_contents($f), true) : null; }
 function writeRoom($rid, $d) {
+    // Auto-add _ts to any messages missing it
     $now = microtime(true);
     foreach ($d['messages'] as &$m) {
         if (!isset($m['_ts'])) $m['_ts'] = $now;
@@ -118,146 +120,72 @@ function playerList($room) {
     }, $room['players']);
 }
 
-// ============================================================
-// Round processing with async row picks
-// ============================================================
+function resolveRound(&$room, $rid) {
+    // Pass 1: Process all cards in sorted order. When a human must_pick_row is needed,
+    uksort($chosen, function($a,$b) use($chosen){ return $chosen[$a] - $chosen[$b]; });
 
-function startRoundProcessing(&$room, $rid) {
-    // Build sorted queue of (pid, card) from $room['chosen']
-    $cards = array();
-    foreach ($room['chosen'] as $pid => $card) {
-        $cards[] = array('pid' => $pid, 'card' => $card);
-    }
-    usort($cards, function($a, $b) { return $a['card'] - $b['card']; });
-
-    $room['round_queue'] = $cards;
-    $room['round_queue_index'] = 0;
-    $room['round_processing'] = true;
-    // No need for snapshot here; we'll process sequentially
-
-    processNextCard($room, $rid);
-}
-
-function processNextCard(&$room, $rid) {
-    if (!$room['round_processing']) return;
-    $idx = $room['round_queue_index'];
-    if ($idx >= count($room['round_queue'])) {
-        finishRound($room, $rid);
-        return;
-    }
-
-    $item = $room['round_queue'][$idx];
-    $pid = $item['pid'];
-    $card = $item['card'];
-
-    // Find player
-    $player = null;
-    foreach ($room['players'] as &$p) {
-        if ($p['player_id'] == $pid) { $player = &$p; break; }
-    }
-    if (!$player) {
-        $room['round_queue_index']++;
-        processNextCard($room, $rid);
-        return;
-    }
-
-    $bestRow = findBestRow($room['rows'], $card);
-
-    if ($bestRow === -1) {
-        // Card smaller than all row ends -> must pick a row
-        if (!$player['is_ai']) {
-            // Human: wait for pick_row
-            $room['pending_pick'] = array(
-                'player_id' => $pid,
-                'card' => $card,
-                'queue_index' => $idx,
-                'rows_snapshot' => $room['rows']   // for validation
-            );
-            $room['messages'][] = array(
-                'type' => 'must_pick_row',
-                'target_pid' => $pid,
-                'card' => $card,
-                'rows' => $room['rows'],
-                'rows_snapshot' => json_encode($room['rows']),
-            );
-            // Do NOT advance index; wait for pick_row
-            return;
-        } else {
-            $chosenRow = aiChooseRow($room['rows']);
-            applyTakeRow($room, $player, $chosenRow, $card);
-            $room['round_queue_index']++;
-            processNextCard($room, $rid);
-            return;
+    foreach ($chosen as $pi => $card) {
+        $br = findBestRow($room['rows'], $card);
+        $po = null;
+        foreach ($room['players'] as $k => $p) {
+            if ($p['player_id'] === $pi) { $po = &$room['players'][$k]; break; }
         }
-    } elseif (count($room['rows'][$bestRow]) >= MAX_ROW) {
-        $chosenRow = $bestRow;
-        applyTakeRow($room, $player, $chosenRow, $card);
-        $room['round_queue_index']++;
-        processNextCard($room, $rid);
-        return;
-    } else {
-        // Normal placement
-        $room['rows'][$bestRow][] = $card;
-        $room['logs'][] = array('msg' => $player['name'] . ' played ' . $card . ' -> row ' . ($bestRow+1), 'cls' => '');
-        $room['round_queue_index']++;
-        processNextCard($room, $rid);
-        return;
+
+        if ($br === -1) {
+            // Card is smaller than all row ends - must pick a row
+            if ($po && !$po['is_ai']) {
+                // Human player: send must_pick_row message and wait
+                // Include rows_snapshot so we use consistent row data even under concurrent access
+                $room['messages'][] = array(
+                    'type' => 'must_pick_row',
+                    'target_pid' => $pi,
+                    'card' => $card,
+                    'rows' => $room['rows'],
+                    'rows_snapshot' => json_encode($room['rows']),  // snapshot for concurrency safety
+                );
+                unset($po);
+                continue;
+            } else {
+                // AI player: auto choose row
+                $r = aiChooseRow($room['rows']);
+            }
+        } elseif (count($room['rows'][$br]) >= MAX_ROW) {
+            // Row is full, take it
+            $r = $br;
+        } else {
+            // Normal placement
+            $room['rows'][$br][] = $card;
+            if ($po) {
+                $room['logs'][] = array('msg' => $po['name'] . ' played ' . $card . ' -> row ' . ($br+1), 'cls' => '');
+            }
+            unset($po);
+            continue;
+        }
+
+        // Take row (penalty)
+        $penalty = rowBulls($room['rows'][$r]);
+        $room['rows'][$r] = array($card);
+        if ($po) {
+            $po['score'] += $penalty;
+            $cls = $penalty > 0 ? 'penalty' : '';
+            $room['logs'][] = array('msg' => $po['name'] . ' took row ' . ($r+1) . ' (-' . $penalty . ')', 'cls' => $cls);
+        }
+        unset($po);
     }
-}
 
-function applyTakeRow(&$room, &$player, $rowIndex, $card) {
-    $penalty = rowBulls($room['rows'][$rowIndex]);
-    $player['score'] += $penalty;
-    $room['logs'][] = array('msg' => $player['name'] . ' took row ' . ($rowIndex+1) . ' (-' . $penalty . ')', 'cls' => 'penalty');
-    $room['rows'][$rowIndex] = array($card);
-}
-
-function handlePickRow(&$room, $rid, $pid, $chosenRow, $card, $rowsSnapshotJson) {
-    if (!isset($room['pending_pick']) || $room['pending_pick']['player_id'] != $pid) {
-        return false;
-    }
-    $pending = $room['pending_pick'];
-    if ($pending['card'] != $card) {
-        return false;
-    }
-    // Optional validation: could check snapshot, but we trust client or do simple check
-    // Apply the take using current rows
-    $player = null;
-    foreach ($room['players'] as &$p) {
-        if ($p['player_id'] == $pid) { $player = &$p; break; }
-    }
-    if (!$player) return false;
-
-    applyTakeRow($room, $player, $chosenRow, $card);
-
-    // Advance index to after this pending card
-    $room['round_queue_index'] = $pending['queue_index'] + 1;
-    unset($room['pending_pick']);
-
-    // Send row_picked message
-    $sd = array();
-    foreach ($room['players'] as $p) $sd[$p['player_id']] = $p['score'];
-    $room['messages'][] = array('type' => 'row_picked', 'player_id' => $pid, 'row' => $chosenRow, 'rows' => $room['rows'], 'scores' => $sd);
-
-    // Continue processing next card
-    processNextCard($room, $rid);
-    return true;
-}
-
-function finishRound(&$room, $rid) {
     $room['round']++;
     $room['chosen'] = array();
-    $room['round_queue'] = array();
-    $room['round_queue_index'] = 0;
-    $room['round_processing'] = false;
-    unset($room['pending_pick']);
 
     // Check end conditions
     $handsEmpty = true;
     $someoneMax = false;
     foreach ($room['players'] as $p) {
-        if (!empty($p['hand'])) $handsEmpty = false;
+        if (!$p['is_ai'] && !empty($p['hand'])) $handsEmpty = false;
         if ($p['score'] >= END_SCORE) $someoneMax = true;
+    }
+    // Also check AI hands
+    foreach ($room['players'] as $p) {
+        if ($p['is_ai'] && !empty($p['hand'])) $handsEmpty = false;
     }
 
     if ($handsEmpty || $someoneMax) {
@@ -272,6 +200,8 @@ function finishRound(&$room, $rid) {
         $sd = array();
         foreach ($room['players'] as $p) $sd[$p['player_id']] = $p['score'];
         $room['messages'][] = array('type' => 'round_end', 'round' => $room['round'], 'rows' => $room['rows'], 'scores' => $sd, 'logs' => array_slice($room['logs'], 0, 20));
+
+        // Auto-play AI cards for new round
         autoPlayAI($room);
     }
 
@@ -279,6 +209,7 @@ function finishRound(&$room, $rid) {
 }
 
 function autoPlayAI(&$room) {
+    // AI players auto-play their cards at the start of each round
     foreach ($room['players'] as &$p) {
         if ($p['is_ai'] && !empty($p['hand'])) {
             $strategy = isset($p['strategy']) ? $p['strategy'] : 'greedy';
@@ -301,30 +232,25 @@ function startGameForRoom(&$room) {
     $room['chosen'] = array();
     $room['phase'] = 'playing';
     $room['logs'] = array();
-    $room['round_queue'] = array();
-    $room['round_queue_index'] = 0;
-    $room['round_processing'] = false;
-    unset($room['pending_pick']);
+    // Initialize round-resolution state
 
     for ($i = 0; $i < $totalPlayers; $i++) {
         $room['players'][$i]['hand'] = $d['hands'][$i];
         $room['players'][$i]['score'] = 0;
     }
 
-    // Send game_start only to humans (AI don't need hand data)
-    foreach ($room['players'] as $p) {
-        if (!$p['is_ai']) {
-            $room['messages'][] = array(
-                'type' => 'game_start',
-                'target_pid' => $p['player_id'],
-                'hand' => $p['hand'],
-                'rows' => $d['rows'],
-                'round' => 1,
-                'players' => array_map(function($pp) {
-                    return array('id' => $pp['player_id'], 'name' => $pp['name'], 'score' => $pp['score'], 'is_ai' => $pp['is_ai']);
-                }, $room['players'])
-            );
-        }
+    // Send game_start to each player
+    foreach ($room['players'] as $idx => $p) {
+        $room['messages'][] = array(
+            'type' => 'game_start',
+            'target_pid' => $p['player_id'],
+            'hand' => $p['hand'],
+            'rows' => $d['rows'],
+            'round' => 1,
+            'players' => array_map(function($pp) {
+                return array('id' => $pp['player_id'], 'name' => $pp['name'], 'score' => $pp['score'], 'is_ai' => $pp['is_ai']);
+            }, $room['players'])
+        );
     }
 
     $room['messages'][] = array(
@@ -332,6 +258,7 @@ function startGameForRoom(&$room) {
         'players' => playerList($room)
     );
 
+    // Auto-play AI cards for first round
     autoPlayAI($room);
 }
 
@@ -341,12 +268,9 @@ function startGameForRoom(&$room) {
 
 $input = json_decode(file_get_contents('php://input'), true);
 if (!$input) $input = $_POST;
+// Try to get action from query string first, then from JSON body
 $action = isset($_REQUEST['action']) ? $_REQUEST['action'] : '';
 if (!$action && isset($input['action'])) $action = $input['action'];
-
-if (in_array($action, array('create_room', 'join_room', 'poll'))) {
-    if (mt_rand(1, 100) <= 5) cleanupStaleRooms();
-}
 
 switch ($action) {
 
@@ -358,6 +282,7 @@ case 'create_room':
 
     if (!$pid) { echo json_encode(array('error' => 'player_id required')); exit(); }
 
+    // Validate
     $total = $numHumans + $numAI;
     if ($total < 2 || $total > 6) {
         echo json_encode(array('error' => 'Total players must be 2~6')); exit();
@@ -368,10 +293,12 @@ case 'create_room':
 
     $rid = sprintf('%06d', mt_rand(0, 999999));
 
+    // AI names
     $aiNames = array('Robot Alpha', 'Robot Beta', 'Robot Gamma', 'Robot Delta', 'Robot Epsilon');
     $aiStrategies = array('greedy', 'safe', 'random', 'greedy', 'safe');
 
     $players = array();
+    // Add the human host
     $players[] = array(
         'player_id' => $pid,
         'name' => $pname,
@@ -380,6 +307,7 @@ case 'create_room':
         'hand' => array()
     );
 
+    // Add AI players
     for ($i = 0; $i < $numAI; $i++) {
         $aiId = 'ai_' . $rid . '_' . $i;
         $players[] = array(
@@ -430,9 +358,11 @@ case 'join_room':
     $room = readRoom($rid);
     if (!$room) { echo json_encode(array('error' => 'Room not found')); exit(); }
 
+    // Count current real players
     $realCount = 0;
     foreach ($room['players'] as $p) { if (!$p['is_ai']) $realCount++; }
 
+    // Check if already at capacity for real players
     if ($realCount >= $room['num_humans']) {
         $exists = false;
         foreach ($room['players'] as $p) { if ($p['player_id'] == $pid) $exists = true; }
@@ -441,6 +371,7 @@ case 'join_room':
         }
     }
 
+    // Add player if not already in room
     $exists = false;
     foreach ($room['players'] as $p) { if ($p['player_id'] == $pid) $exists = true; }
     if (!$exists) {
@@ -454,6 +385,7 @@ case 'join_room':
         $realCount++;
     }
 
+    // Notify all players
     $room['messages'][] = array(
         'type' => 'player_joined',
         'player_id' => $pid,
@@ -481,9 +413,15 @@ case 'send':
     $msgType = isset($input['type']) ? $input['type'] : '';
     $rid = isset($input['room_id']) ? $input['room_id'] : '';
     $pid = isset($input['player_id']) ? $input['player_id'] : '';
+    $pname = '';
 
     $room = readRoom($rid);
     if (!$room) { echo json_encode(array('error' => 'Room not found')); exit(); }
+
+    // Find player name
+    foreach ($room['players'] as $p) {
+        if ($p['player_id'] == $pid) { $pname = $p['name']; break; }
+    }
 
     if ($msgType === 'start_game') {
         if ($room['host_id'] !== $pid) { echo json_encode(array('error' => 'Only host can start')); exit(); }
@@ -501,17 +439,15 @@ case 'send':
         }
 
         $room['chosen'][$pid] = $card;
-        $pname = '';
         foreach ($room['players'] as &$p) {
             if ($p['player_id'] == $pid) {
                 $k = array_search($card, $p['hand']);
                 if ($k !== false) array_splice($p['hand'], $k, 1);
-                $pname = $p['name'];
-                break;
             }
         }
         unset($p);
 
+        // Count remaining human players who haven't played
         $remain = 0;
         foreach ($room['players'] as $p) {
             if (!$p['is_ai'] && !isset($room['chosen'][$p['player_id']])) $remain++;
@@ -521,14 +457,7 @@ case 'send':
         $playedCards = $room['chosen'];
         uksort($playedCards, function($a,$b) use($playedCards){ return $playedCards[$a] - $playedCards[$b]; });
 
-        $room['messages'][] = array(
-            'type' => 'card_played',
-            'player_id' => $pid,
-            'card' => $card,
-            'remaining' => $remain,
-            'player_name' => $pname,
-            'played_cards' => $playedCards
-        );
+        $room['messages'][] = array('type' => 'card_played', 'player_id' => $pid, 'card' => $card, 'remaining' => $remain, 'player_name' => ($po ? $po['name'] : ''), 'played_cards' => $playedCards);
 
         // Check if all human players have played
         $allPlayed = true;
@@ -539,20 +468,18 @@ case 'send':
         }
 
         if ($allPlayed) {
-            // Ensure AI have played (autoPlayAI should have done, but double-check)
+            // AI should already have played (autoPlayAI), but check for safety
             foreach ($room['players'] as &$p) {
                 if ($p['is_ai'] && !isset($room['chosen'][$p['player_id']]) && !empty($p['hand'])) {
                     $strategy = isset($p['strategy']) ? $p['strategy'] : 'greedy';
                     $ac = aiChooseCard($p['hand'], $room['rows'], $strategy);
-                    if ($ac !== null) {
-                        $room['chosen'][$p['player_id']] = $ac;
-                        $k = array_search($ac, $p['hand']);
-                        if ($k !== false) array_splice($p['hand'], $k, 1);
-                    }
+                    $room['chosen'][$p['player_id']] = $ac;
+                    $k = array_search($ac, $p['hand']);
+                    if ($k !== false) array_splice($p['hand'], $k, 1);
                 }
             }
             unset($p);
-            startRoundProcessing($room, $rid);
+            resolveRound($room, $rid);
         }
 
         $room['last_update'] = microtime(true);
@@ -562,11 +489,46 @@ case 'send':
     elseif ($msgType === 'pick_row') {
         $ri = intval($input['row']);
         $card = intval($input['card']);
-        $rowsSnapshot = isset($input['rows_snapshot']) ? $input['rows_snapshot'] : '';
-        $success = handlePickRow($room, $rid, $pid, $ri, $card, $rowsSnapshot);
+
+        // Use rows_snapshot for concurrency safety (prevents two players corrupting same row)
+        $rowsData = isset($input['rows_snapshot']) ? json_decode($input['rows_snapshot'], true) : null;
+        if (!$rowsData) $rowsData = $room['rows'];
+
+        // Validate the row index and card still matches (concurrency check)
+        $expectedCard = isset($rowsData[$ri][0]) ? $rowsData[$ri][0] : null;
+        if ($expectedCard !== null && $expectedCard != $card) {
+            echo json_encode(array('ok' => true, 'warning' => 'row_mismatch', 'expected' => $expectedCard, 'got' => $card));
+            exit();
+        }
+
+        // Apply penalty: human picks a row because their card was too small
+        $penalty = rowBulls($rowsData[$ri]);
+
+        foreach ($room['players'] as &$p) {
+            if ($p['player_id'] == $pid) $p['score'] += $penalty;
+        }
+        unset($p);
+
+        $room['rows'][$ri] = array($card);
+        $rowsData[$ri] = array($card);
+        $room['logs'][] = array('msg' => $pname . ' took row ' . ($ri+1) . ' (-' . $penalty . ')', 'cls' => 'penalty');
+
+        $sd = array();
+        foreach ($room['players'] as $p) $sd[$p['player_id']] = $p['score'];
+
+        $room['messages'][] = array('type' => 'row_picked', 'player_id' => $pid, 'row' => $ri, 'rows' => $rowsData, 'scores' => $sd);
+
+        // After row is picked, check if all pending picks are resolved for this round
+        $pendingPicks = false;
+        foreach ($room['messages'] as $m) {
+            if (isset($m['type']) && $m['type'] === 'must_pick_row' && !isset($m['_resolved'])) {
+                $pendingPicks = true; break;
+            }
+        }
+
         $room['last_update'] = microtime(true);
         writeRoom($rid, $room);
-        echo json_encode(array('ok' => true, 'success' => $success));
+        echo json_encode(array('ok' => true));
     }
     else {
         echo json_encode(array('error' => 'Unknown message type'));
@@ -581,13 +543,16 @@ case 'poll':
     $room = readRoom($rid);
     if (!$room) { echo json_encode(array('type' => 'error', 'detail' => 'Room not found')); exit(); }
 
+    // Check if we should auto-start (all humans joined)
     if ($room['phase'] === 'waiting') {
         $realCount = 0;
         foreach ($room['players'] as $p) { if (!$p['is_ai']) $realCount++; }
         if ($realCount >= $room['num_humans']) {
+            // Auto-start the game!
             startGameForRoom($room);
             $room['last_update'] = microtime(true);
             writeRoom($rid, $room);
+            // Re-read room after auto-start
             $room = readRoom($rid);
         }
     }
@@ -599,6 +564,7 @@ case 'poll':
         $room = readRoom($rid);
         if (!$room) break;
 
+        // Check auto-start again in case someone joined while we were polling
         if ($room['phase'] === 'waiting') {
             $rc = 0;
             foreach ($room['players'] as $p) { if (!$p['is_ai']) $rc++; }
@@ -619,9 +585,11 @@ case 'poll':
                     $newMsgs[] = $m;
                     $consumedKeys[] = $mi;
                 }
+                // Don't unset non-target messages - let them for other players
             }
         }
 
+        // Only remove consumed messages and write back if we actually consumed something
         if (!empty($consumedKeys)) {
             foreach ($consumedKeys as $ck) {
                 unset($room['messages'][$ck]);
@@ -653,13 +621,19 @@ case 'room_info':
     ));
     break;
 
+// ============================================================
+// Admin APIs
+// ============================================================
+
 case 'admin_list':
+    // List all active rooms with summary info
     $files = glob($DATA_DIR . 'room_*.json');
     $rooms = array();
     foreach ($files as $f) {
         $r = json_decode(file_get_contents($f), true);
         if (!$r) continue;
-        $realCount = 0; $aiCount = 0;
+        $realCount = 0;
+        $aiCount = 0;
         if (isset($r['players'])) {
             foreach ($r['players'] as $p) {
                 if (!empty($p['is_ai'])) $aiCount++; else $realCount++;
@@ -674,16 +648,21 @@ case 'admin_list':
             'actual_ai' => $aiCount,
             'total_players' => count($r['players']),
             'round' => isset($r['round']) ? $r['round'] : 0,
-            'host_name' => isset($r['players'][0]['name']) ? $r['players'][0]['name'] : '',
+            'host_name' => '',
             'created' => filemtime($f),
             'age_sec' => time() - filemtime($f)
         );
+        // Get host name
+        if (isset($r['players']) && !empty($r['players'])) {
+            $rooms[count($rooms)-1]['host_name'] = $r['players'][0]['name'];
+        }
     }
     usort($rooms, function($a,$b){ return $b['created'] - $a['created']; });
     echo json_encode(array('total' => count($rooms), 'rooms' => $rooms, 'server_time' => time()));
     break;
 
 case 'admin_cleanup':
+    // Force cleanup of stale rooms now
     $removed = cleanupStaleRooms();
     echo json_encode(array('ok' => true, 'removed' => $removed));
     break;
@@ -691,3 +670,4 @@ case 'admin_cleanup':
 default:
     echo json_encode(array('error' => 'Unknown action: create_room, join_room, send, poll, room_info, admin_list, admin_cleanup'));
 }
+

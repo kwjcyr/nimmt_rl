@@ -8,7 +8,7 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-    background: #1a1a2e;
+    background: #1a1da2e;
     color: #eee;
     min-height: 100vh;
   }
@@ -662,21 +662,11 @@ function pollLoop() {
     });
 }
 
-// ==================== 修复后的 sendToServer ====================
 function sendToServer(msg) {
-  var payload = {
-    action: "send",
-    type: msg.type,
-    room_id: state.roomId,
-    player_id: state.playerId
-  };
-  if (msg.card !== undefined) payload.card = msg.card;
-  if (msg.row !== undefined) payload.row = msg.row;
-  if (msg.rows_snapshot !== undefined) payload.rows_snapshot = msg.rows_snapshot;
   fetch(API_BASE, {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ action: "send", type: msg.type, room_id: state.roomId, player_id: state.playerId, card: msg.card, row: msg.row })
   }).catch(function(e){ console.error("[Send] error:", e); });
 }
 
@@ -1055,3 +1045,4 @@ checkServerHealth();
 </script>
 </body>
 </html>
+
