@@ -1,0 +1,7 @@
+/* Global styles for 6 Nimmt! */
+page {
+  background-color: #1a1a2e;
+  color: #eee;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
