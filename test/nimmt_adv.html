@@ -389,6 +389,50 @@ let pollTs = 0;   // long poll timestamp
 let polling = false;
 let roomInfoCheckTimer = null;  // 定期检查房间状态（兜底）
 
+// ============================================================
+//  card_placed 逐张动画队列
+// ============================================================
+let cardPlacedQueue = [];    // 待播放的 card_placed 消息列表
+let cardPlacedPlaying = false; // 是否正在逐张播放中
+const CARD_PLACE_DELAY = 350;  // 每张牌放置间隔 ms
+
+function enqueueCardPlaced(msg) {
+  cardPlacedQueue.push(msg);
+  if (!cardPlacedPlaying) drainCardPlaced();
+}
+
+function drainCardPlaced() {
+  if (cardPlacedQueue.length === 0) {
+    cardPlacedPlaying = false;
+    return;
+  }
+  cardPlacedPlaying = true;
+  var msg = cardPlacedQueue.shift();
+  // 应用这一张牌的状态
+  if (msg.log_msg) addLog(msg.log_msg, msg.log_cls || "");
+  if (msg.rows) state.rows = msg.rows;
+  if (msg.scores) state.scores = msg.scores;
+  renderRows();
+  renderScoreboard();
+  // 延迟后处理下一张
+  setTimeout(drainCardPlaced, CARD_PLACE_DELAY);
+}
+
+// 等待队列清空后再执行回调（用于 round_end/must_pick_row 等消息）
+function afterCardPlaced(fn) {
+  if (!cardPlacedPlaying && cardPlacedQueue.length === 0) {
+    fn();
+  } else {
+    // 每隔 50ms 检查一次队列是否处理完
+    var waitTimer = setInterval(function() {
+      if (!cardPlacedPlaying && cardPlacedQueue.length === 0) {
+        clearInterval(waitTimer);
+        fn();
+      }
+    }, 50);
+  }
+}
+
 const TOTAL = 100, NUM_ROWS = 5, MAX_ROW = 6, HAND_SIZE = 10, END_SCORE = 66;
 
 function getBulls(c) { if(c===55)return 7; if(c%11===0)return 5; if(c%10===0)return 3; if(c%5===0)return 2; return 1; }
@@ -810,63 +854,76 @@ function handleServerMessage(msg) {
       break;
 
     case "card_placed":
-      // 结算动作广播：显示到日志，更新牌桌和记分
-      if (msg.log_msg) addLog(msg.log_msg, msg.log_cls || "");
-      if (msg.rows) state.rows = msg.rows;
-      if (msg.scores) state.scores = msg.scores;
-      renderRows();
-      renderScoreboard();
+      // 结算动作广播：加入逐张动画队列，逐条延迟显示
+      enqueueCardPlaced(msg);
       break;
 
     case "must_pick_row":
-      state.phase = "pick_row";
-      state.choosingForCard = msg.card;
-      // Use rows_snapshot for concurrency safety (prevents two players seeing stale row data)
-      state.rows = msg.rows || state.rows;
-      state._rowsSnapshot = msg.rows_snapshot || "";
-      setActionMsg("\uD83D\uDE31 你的牌 <b>" + msg.card + "</b> 最小，请选择要收走的一列！");
-      showRowModal();
-      renderRows();
+      // 等 card_placed 队列播完再弹选列框
+      (function(m) {
+        afterCardPlaced(function() {
+          state.phase = "pick_row";
+          state.choosingForCard = m.card;
+          state.rows = m.rows || state.rows;
+          state._rowsSnapshot = m.rows_snapshot || "";
+          setActionMsg("\uD83D\uDE31 你的牌 <b>" + m.card + "</b> 最小，请选择要收走的一列！");
+          showRowModal();
+          renderRows();
+        });
+      })(msg);
       break;
 
     case "round_end":
-      state.round = msg.round;
-      state.rows = msg.rows || [];
-      state.scores = msg.scores || state.scores;
-      // 若本地日志为空（重连/刷新场景），从服务器快照恢复；否则保留本地实时日志
-      if (state.logs.length === 0 && msg.logs && msg.logs.length > 0) {
-        state.logs = msg.logs.slice().reverse(); // 服务器是正序，本地是倒序（最新在上）
-        if (state.logs.length > 60) state.logs = state.logs.slice(0, 60);
-      }
-      state.phase = "playing";
-      state.selectedCard = null;
-      setActionMsg("\uD83C\uDCAF 第 " + msg.round + " 轮 \u2014 点击你的牌出牌");
-      state.playedCards = {};
-      renderAll();
+      // 等 card_placed 队列播完再切换到下一轮
+      (function(m) {
+        afterCardPlaced(function() {
+          state.round = m.round;
+          state.rows = m.rows || [];
+          state.scores = m.scores || state.scores;
+          // 若本地日志为空（重连/刷新场景），从服务器快照恢复；否则保留本地实时日志
+          if (state.logs.length === 0 && m.logs && m.logs.length > 0) {
+            state.logs = m.logs.slice().reverse();
+            if (state.logs.length > 60) state.logs = state.logs.slice(0, 60);
+          }
+          state.phase = "playing";
+          state.selectedCard = null;
+          setActionMsg("\uD83C\uDCAF 第 " + m.round + " 轮 \u2014 点击你的牌出牌");
+          state.playedCards = {};
+          renderAll();
+        });
+      })(msg);
       break;
 
     case "row_picked":
-      hideRowModal();
-      state.rows = msg.rows || [];
-      state.scores = msg.scores || state.scores;
-      state.phase = "playing";
-      if (msg.auto) {
-        // 超时自动代选：提示玩家
-        const autoName = (state.players.find(p => p.id === msg.player_id) || {}).name || msg.player_id;
-        addLog(`⏰ ${autoName} 超时未选列，AI 自动代选第${(msg.row + 1)}列`, 'warn');
-      }
-      renderAll();
+      // 等 card_placed 队列播完再更新收牌状态
+      (function(m) {
+        afterCardPlaced(function() {
+          hideRowModal();
+          state.rows = m.rows || [];
+          state.scores = m.scores || state.scores;
+          state.phase = "playing";
+          if (m.auto) {
+            var autoName = (state.players.find(function(p){ return p.id === m.player_id; }) || {}).name || m.player_id;
+            addLog('⏰ ' + autoName + ' 超时未选列，AI 自动代选第' + (m.row + 1) + '列', 'warn');
+          }
+          renderAll();
+        });
+      })(msg);
       break;
 
     case "game_over":
-      state.phase = "finished";
-      // 若本地日志为空（重连场景），从服务器快照恢复；否则保留本地实时日志
-      if (state.logs.length === 0 && msg.logs && msg.logs.length > 0) {
-        state.logs = msg.logs.slice().reverse();
-        if (state.logs.length > 60) state.logs = state.logs.slice(0, 60);
-      }
-      showEndModal(msg.ranking || []);
-      setActionMsg("\uD83C\uDFC6 Game Over!");
+      // 等 card_placed 队列播完再显示结算
+      (function(m) {
+        afterCardPlaced(function() {
+          state.phase = "finished";
+          if (state.logs.length === 0 && m.logs && m.logs.length > 0) {
+            state.logs = m.logs.slice().reverse();
+            if (state.logs.length > 60) state.logs = state.logs.slice(0, 60);
+          }
+          showEndModal(m.ranking || []);
+          setActionMsg('\uD83C\uDFC6 Game Over!');
+        });
+      })(msg);
       break;
   }
 }
@@ -883,6 +940,9 @@ function startGame() {
 
 function leaveRoom() {
   stopPolling();
+  // 清空结算动画队列
+  cardPlacedQueue = [];
+  cardPlacedPlaying = false;
   state = { phase: "lobby", playerId: "", myName: "", roomId: "", players: [], isHost: false, hand: [], rows: [], scores: {}, round: 1, selectedCard: null, logs: [], playedCards: {}, _rowsSnapshot: "", numHumans: 2, numAI: 2, choosingForCard: null };
   pollTs = 0;
   showScreen("lobby");
