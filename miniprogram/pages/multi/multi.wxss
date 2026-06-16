@@ -1,0 +1,488 @@
+/* ===== 大厅 ===== */
+.lobby-screen {
+  padding: 60rpx 40rpx;
+  min-height: 100vh;
+}
+.title {
+  font-size: 56rpx;
+  font-weight: bold;
+  color: #f9c74f;
+  display: block;
+  text-align: center;
+  margin-bottom: 10rpx;
+}
+.subtitle {
+  font-size: 26rpx;
+  color: #aaa;
+  display: block;
+  text-align: center;
+  margin-bottom: 40rpx;
+}
+.form-box {
+  background: #16213e;
+  border: 2rpx solid #0f3460;
+  border-radius: 24rpx;
+  padding: 40rpx;
+}
+.form-item { margin-bottom: 24rpx; }
+.form-label {
+  display: block;
+  font-size: 24rpx;
+  color: #aaa;
+  margin-bottom: 10rpx;
+}
+.form-input {
+  width: 100%;
+  height: 88rpx;
+  line-height: 88rpx;
+  padding: 0 24rpx;
+  border-radius: 12rpx;
+  border: 2rpx solid #0f3460;
+  background: #0a0a1a;
+  color: #eee;
+  font-size: 30rpx;
+  box-sizing: border-box;
+  display: block;
+}
+.config-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20rpx;
+}
+.config-label { font-size: 28rpx; color: #ccc; }
+.num-ctrl { display: flex; align-items: center; gap: 0; }
+.num-btn {
+  width: 60rpx;
+  height: 60rpx;
+  background: #1a2a4e;
+  border: 2rpx solid #0f3460;
+  color: #eee;
+  font-size: 36rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12rpx;
+  flex-shrink: 0;
+}
+.num-val {
+  font-size: 36rpx;
+  font-weight: bold;
+  color: #f9c74f;
+  padding: 0 24rpx;
+  min-width: 60rpx;
+  text-align: center;
+}
+.config-total {
+  font-size: 24rpx;
+  color: #aaa;
+  text-align: center;
+  padding-top: 16rpx;
+  border-top: 1rpx solid #0f3460;
+  margin-bottom: 24rpx;
+}
+.config-total.error { color: #e74c3c; }
+
+.btn-primary {
+  background: linear-gradient(135deg, #4cc9f0, #4361ee);
+  color: #fff;
+  font-size: 30rpx;
+  font-weight: bold;
+  padding: 24rpx;
+  border-radius: 16rpx;
+  width: 100%;
+  margin-bottom: 16rpx;
+}
+.btn-warning {
+  background: linear-gradient(135deg, #f9c74f, #f3722c);
+  color: #fff;
+  font-size: 30rpx;
+  font-weight: bold;
+  padding: 24rpx;
+  border-radius: 16rpx;
+  width: 100%;
+  margin-bottom: 16rpx;
+}
+.btn-gray {
+  background: #2a2a4a;
+  color: #aaa;
+  font-size: 28rpx;
+  padding: 20rpx;
+  border-radius: 16rpx;
+  width: 100%;
+  border: 2rpx solid #444;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  margin: 24rpx 0;
+  color: #555;
+  font-size: 24rpx;
+}
+.divider-line {
+  flex: 1;
+  height: 1rpx;
+  background: #333;
+}
+.divider-text {
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: #555;
+  font-size: 24rpx;
+}
+
+/* ===== 等待室 ===== */
+.waiting-screen {
+  padding: 40rpx;
+  min-height: 100vh;
+}
+.room-header {
+  text-align: center;
+  margin-bottom: 32rpx;
+}
+.room-title {
+  font-size: 44rpx;
+  font-weight: bold;
+  color: #eee;
+  display: block;
+  margin-bottom: 10rpx;
+}
+.room-id {
+  font-size: 48rpx;
+  font-weight: bold;
+  color: #4cc9f0;
+  font-family: monospace;
+  letter-spacing: 8rpx;
+  display: block;
+  background: #16213e;
+  border: 2rpx solid #4361ee;
+  border-radius: 30rpx;
+  padding: 20rpx 48rpx;
+  margin: 16rpx auto;
+  text-align: center;
+}
+.waiting-tip {
+  font-size: 26rpx;
+  color: #f9c74f;
+  display: block;
+  background: #1a1a0e;
+  border: 2rpx solid #2a2a0e;
+  border-radius: 12rpx;
+  padding: 16rpx;
+}
+.waiting-tip.full {
+  color: #2ecc71;
+  background: #0e1a0e;
+  border-color: #1a2a1a;
+}
+.players-list {
+  background: #16213e;
+  border: 2rpx solid #0f3460;
+  border-radius: 20rpx;
+  padding: 24rpx;
+  margin-bottom: 24rpx;
+}
+.player-item {
+  display: flex;
+  align-items: center;
+  padding: 16rpx 20rpx;
+  border-radius: 12rpx;
+  background: #0a0a1a;
+  font-size: 28rpx;
+  color: #eee;
+  margin-bottom: 8rpx;
+}
+.player-item.me {
+  border: 2rpx solid #f9c74f;
+}
+
+/* ===== 计分板 ===== */
+.scoreboard {
+  white-space: nowrap;
+  padding: 16rpx 8rpx;
+  margin-bottom: 16rpx;
+  display: flex;
+  gap: 12rpx;
+}
+.score-card {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  background: #16213e;
+  border: 2rpx solid #0f3460;
+  border-radius: 20rpx;
+  padding: 12rpx 20rpx;
+  min-width: 120rpx;
+  flex-shrink: 0;
+}
+.score-card.human { border-color: #f9c74f; }
+.score-card.danger .s-pts { color: #f3722c; }
+.s-name { font-size: 22rpx; color: #aaa; }
+.s-pts { font-size: 36rpx; font-weight: bold; }
+.score-card.human .s-pts { color: #f9c74f; }
+
+/* ===== 牌桌区 ===== */
+.section { margin-bottom: 20rpx; padding: 0 16rpx; }
+.sec-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10rpx;
+}
+.sec-title { font-size: 26rpx; color: #aaa; }
+.round-label { font-size: 24rpx; color: #888; }
+.rows-grid { display: flex; flex-direction: column; gap: 12rpx; }
+.row-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  background: #16213e;
+  border: 2rpx solid #0f3460;
+  border-radius: 16rpx;
+  padding: 14rpx 16rpx;
+}
+.row-wrap.full { border-color: #f3722c; }
+.row-label { font-size: 22rpx; color: #aaa; min-width: 80rpx; flex-shrink: 0; }
+.row-cards {
+  display: flex;
+  gap: 8rpx;
+  flex: 1;
+  white-space: nowrap;
+}
+.slots {
+  display: flex;
+  gap: 4rpx;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.slot {
+  width: 18rpx;
+  height: 18rpx;
+  border-radius: 6rpx;
+  background: #0f3460;
+}
+.slot.filled { background: #4cc9f0; }
+.row-bulls-t {
+  font-size: 22rpx;
+  color: #888;
+  flex-shrink: 0;
+  min-width: 70rpx;
+  text-align: right;
+}
+
+/* ===== 牌样式 ===== */
+.card {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 84rpx;
+  height: 110rpx;
+  border-radius: 12rpx;
+  border: 3rpx solid #333;
+  background: #fff;
+  color: #222;
+  font-weight: bold;
+  flex-shrink: 0;
+  position: relative;
+}
+.c-num { font-size: 30rpx; line-height: 1.2; }
+.c-bull { font-size: 18rpx; color: #c0392b; margin-top: 2rpx; }
+.card.b1 { background: #fff; }
+.card.b2 { background: #fef9e7; border-color: #f39c12; }
+.card.b3 { background: #fef3e2; border-color: #e67e22; }
+.card.b5 { background: #fde8d8; border-color: #e74c3c; }
+.card.b7 { background: #fdecec; border-color: #c0392b; color: #c0392b; }
+.card.selectable { border-color: #4cc9f0; }
+.card.selected {
+  transform: translateY(-16rpx);
+  box-shadow: 0 8rpx 24rpx rgba(249,199,79,0.5);
+  border-color: #f9c74f !important;
+  background: #fffbe6;
+}
+
+/* ===== 已出牌区 ===== */
+.played-area {
+  background: #0f1a2e;
+  border: 2rpx solid #0f3460;
+  border-radius: 16rpx;
+  padding: 16rpx 20rpx;
+  margin: 0 16rpx 20rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+.played-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 10rpx;
+  background: #1a1a0e;
+  border: 2rpx solid #f9c74f;
+  border-radius: 12rpx;
+  padding: 10rpx 24rpx;
+  font-size: 26rpx;
+}
+.played-num {
+  font-size: 32rpx;
+  font-weight: bold;
+  color: #f9c74f;
+}
+.played-empty {
+  font-size: 26rpx;
+  color: #555;
+}
+
+/* ===== 操作区 ===== */
+.action-area {
+  background: #16213e;
+  border: 2rpx solid #0f3460;
+  border-radius: 20rpx;
+  padding: 24rpx;
+  margin: 0 16rpx 20rpx;
+  min-height: 120rpx;
+}
+.action-msg {
+  font-size: 28rpx;
+  line-height: 1.6;
+  margin-bottom: 16rpx;
+  display: block;
+  color: #eee;
+}
+.action-btns { display: flex; gap: 16rpx; flex-wrap: wrap; }
+.btn-confirm {
+  background: linear-gradient(135deg, #4cc9f0, #4361ee);
+  color: #fff;
+  font-size: 28rpx;
+  font-weight: bold;
+  padding: 16rpx 40rpx;
+  border-radius: 12rpx;
+  width: auto !important;
+  display: inline-block;
+}
+
+/* ===== 手牌 ===== */
+.hand-section { margin-bottom: 20rpx; }
+.hand-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10rpx;
+  padding: 0 16rpx;
+}
+.hand-cards {
+  display: flex;
+  gap: 12rpx;
+  white-space: nowrap;
+  padding: 8rpx 16rpx;
+  min-height: 120rpx;
+  align-items: flex-end;
+}
+
+/* ===== 日志 ===== */
+.log-section {
+  background: #16213e;
+  border: 2rpx solid #0f3460;
+  border-radius: 16rpx;
+  padding: 16rpx;
+  margin: 0 16rpx 20rpx;
+  height: 300rpx;
+}
+.log-scroll { height: 100%; }
+.log-entry {
+  font-size: 24rpx;
+  color: #ccc;
+  padding: 6rpx 0;
+  border-bottom: 1rpx solid #0f3460;
+  display: block;
+}
+.log-entry.penalty { color: #f3722c; }
+.log-entry.you { color: #f9c74f; }
+.log-entry.system { color: #4cc9f0; }
+.log-entry.warn { color: #f8961e; font-style: italic; }
+
+.leave-btn { margin: 0 16rpx 40rpx; }
+
+/* ===== 弹窗通用 ===== */
+.modal-mask {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.75);
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-box {
+  background: #1a1a2e;
+  border: 2rpx solid #0f3460;
+  border-radius: 28rpx;
+  padding: 40rpx;
+  width: 85%;
+  max-width: 600rpx;
+  text-align: center;
+}
+.modal-title {
+  font-size: 40rpx;
+  font-weight: bold;
+  display: block;
+  margin-bottom: 16rpx;
+}
+.modal-desc {
+  font-size: 26rpx;
+  color: #aaa;
+  line-height: 1.6;
+  display: block;
+  margin-bottom: 24rpx;
+}
+
+/* ===== 选列弹窗 ===== */
+.row-choices { display: flex; flex-direction: column; gap: 12rpx; margin-bottom: 24rpx; }
+.choice-btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #16213e;
+  border: 2rpx solid #0f3460;
+  border-radius: 16rpx;
+  padding: 20rpx 24rpx;
+}
+.choice-info { text-align: left; }
+.choice-label { font-size: 24rpx; color: #aaa; margin-bottom: 8rpx; display: block; }
+.choice-cards { display: flex; gap: 6rpx; flex-wrap: wrap; }
+.mini-card {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52rpx;
+  height: 68rpx;
+  border-radius: 8rpx;
+  border: 2rpx solid #444;
+  background: #fff;
+  color: #222;
+  font-size: 22rpx;
+  font-weight: bold;
+}
+.choice-arrow {
+  font-size: 32rpx;
+  color: #f3722c;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+/* ===== 结算弹窗 ===== */
+.ranking-list { text-align: left; margin-bottom: 24rpx; }
+.rank-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 12rpx 16rpx;
+  border-radius: 10rpx;
+  margin-bottom: 6rpx;
+  background: #16213e;
+  font-size: 28rpx;
+  color: #eee;
+}
+.rank-row.winner { background: #2a2a0e; border: 2rpx solid #f9c74f; }
+.rank-row.you-row { border: 2rpx solid #4cc9f0; }
+

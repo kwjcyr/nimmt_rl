@@ -1,0 +1,186 @@
+<!-- ==================== 大厅 ==================== -->
+<view wx:if="{{screen === 'lobby'}}" class="lobby-screen">
+  <text class="title">🌐 多人联机</text>
+  <text class="subtitle">与真实玩家实时对战</text>
+
+  <view class="form-box">
+    <view class="form-item">
+      <text class="form-label">👤 昵称</text>
+      <input class="form-input" value="{{myName}}" bindinput="onNameInput"
+        placeholder="输入你的昵称" maxlength="12" />
+    </view>
+
+    <view class="config-row">
+      <text class="config-label">👤 真实玩家数</text>
+      <view class="num-ctrl">
+        <view class="num-btn" bindtap="adjHumans" data-d="-1">−</view>
+        <text class="num-val">{{numHumans}}</text>
+        <view class="num-btn" bindtap="adjHumans" data-d="1">+</view>
+      </view>
+    </view>
+    <view class="config-row">
+      <text class="config-label">🤖 AI 玩家数</text>
+      <view class="num-ctrl">
+        <view class="num-btn" bindtap="adjAI" data-d="-1">−</view>
+        <text class="num-val">{{numAI}}</text>
+        <view class="num-btn" bindtap="adjAI" data-d="1">+</view>
+      </view>
+    </view>
+    <text class="config-total {{totalValid ? '' : 'error'}}">总计：{{numHumans + numAI}} 人（2~6人，真实玩家≥1）</text>
+
+    <button class="btn-primary" bindtap="createRoom">🏠 创建房间</button>
+
+    <view class="divider">
+      <view class="divider-line"></view>
+      <text class="divider-text">或加入已有房间</text>
+      <view class="divider-line"></view>
+    </view>
+
+    <view class="form-item">
+      <text class="form-label">🎫 房间号</text>
+      <input class="form-input" value="{{joinRoomId}}" bindinput="onRoomIdInput"
+        placeholder="输入6位房间号" maxlength="6" />
+    </view>
+    <button class="btn-warning" bindtap="joinRoom">🚪 加入房间</button>
+  </view>
+</view>
+
+<!-- ==================== 等待室 ==================== -->
+<view wx:if="{{screen === 'waiting'}}" class="waiting-screen">
+  <view class="room-header">
+    <text class="room-title">🏠 等待室</text>
+    <text class="room-id">房间号：{{roomId}}</text>
+    <text class="waiting-tip {{waitingFull ? 'full' : ''}}">{{waitingTip}}</text>
+  </view>
+
+  <view class="players-list">
+    <view wx:for="{{players}}" wx:key="id" class="player-item {{item.id === playerId ? 'me' : ''}}">
+      <text>{{item.name}}{{item.is_ai ? ' 🤖' : ''}}{{item.id === playerId ? '（你）' : ''}}</text>
+    </view>
+  </view>
+
+  <button wx:if="{{isHost}}" class="btn-primary" bindtap="startGame">▶️ 开始游戏</button>
+  <button class="btn-gray" bindtap="leaveRoom">🚪 离开</button>
+</view>
+
+<!-- ==================== 游戏界面 ==================== -->
+<block wx:if="{{screen === 'playing'}}">
+
+  <!-- 记分板 -->
+  <scroll-view scroll-x class="scoreboard" enhanced show-scrollbar="{{false}}">
+    <view wx:for="{{scoreItems}}" wx:key="id"
+      class="score-card {{item.isMe ? 'human' : ''}} {{item.danger ? 'danger' : ''}}">
+      <text class="s-name">{{item.name}}</text>
+      <text class="s-pts">{{item.score}}🐂</text>
+    </view>
+  </scroll-view>
+
+  <!-- 牌桌 -->
+  <view class="section">
+    <view class="sec-header">
+      <text class="sec-title">📋 牌桌</text>
+      <text class="round-label">第{{round}}轮</text>
+    </view>
+    <view class="rows-grid">
+      <view wx:for="{{rowData}}" wx:key="index" class="row-wrap {{item.isFull ? 'full' : ''}}">
+        <text class="row-label">列{{item.label}}</text>
+        <scroll-view scroll-x class="row-cards" enhanced show-scrollbar="{{false}}">
+          <view wx:for="{{item.cards}}" wx:for-item="c" wx:key="index" class="card {{c.cls}}">
+            <text class="c-num">{{c.num}}</text>
+            <text class="c-bull">{{c.bullsEmoji}}</text>
+          </view>
+        </scroll-view>
+        <view class="slots">
+          <view wx:for="{{item.slots}}" wx:for-item="sl" wx:key="index" class="slot {{sl.filled ? 'filled' : ''}}"></view>
+        </view>
+        <text class="row-bulls-t">共{{item.totalBulls}}🐂</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 已出牌区 -->
+  <view class="played-area">
+    <text class="sec-title">🃏 已出牌</text>
+    <view wx:if="{{playedCard}}" class="played-item">
+      <text>✅ 你</text>
+      <text class="played-num">{{playedCard}}</text>
+    </view>
+    <text wx:else class="played-empty">⏳ 等待出牌...</text>
+  </view>
+
+  <!-- 操作区 -->
+  <view class="action-area">
+    <text class="action-msg">{{actionMsg}}</text>
+    <view class="action-btns">
+      <button wx:if="{{canConfirm}}" class="btn-confirm" bindtap="confirmPlay">出这张牌 ✔</button>
+    </view>
+  </view>
+
+  <!-- 手牌 -->
+  <view class="section hand-section">
+    <view class="hand-header">
+      <text class="sec-title">🃏 你的手牌</text>
+      <text class="round-label">剩余{{handData.length}}张</text>
+    </view>
+    <scroll-view scroll-x class="hand-cards" enhanced show-scrollbar="{{false}}">
+      <view wx:for="{{handData}}" wx:key="index"
+        class="card {{item.cls}}"
+        bindtap="onCardClick"
+        data-card="{{item.num}}">
+        <text class="c-num">{{item.num}}</text>
+        <text class="c-bull">{{item.bullsEmoji}}</text>
+      </view>
+    </scroll-view>
+  </view>
+
+  <!-- 日志 -->
+  <view class="log-section">
+    <scroll-view scroll-y class="log-scroll" enhanced show-scrollbar="{{false}}" scroll-top="{{logScrollTop}}">
+      <view wx:for="{{logs}}" wx:key="index" class="log-entry {{item.cls}}">
+        <text>{{item.msg}}</text>
+      </view>
+    </scroll-view>
+  </view>
+
+  <button class="btn-gray leave-btn" bindtap="leaveRoom">🚪 离开游戏</button>
+
+</block>
+
+<!-- ==================== 选列弹窗 ==================== -->
+<view wx:if="{{showRowModal}}" class="modal-mask" catchtap="">
+  <view class="modal-box">
+    <text class="modal-title">😱 你的牌 {{choosingForCard}} 最小！</text>
+    <text class="modal-desc">你的牌比所有列末尾都小，必须选一列收走</text>
+    <view class="row-choices">
+      <view wx:for="{{rowData}}" wx:key="index" class="choice-btn" bindtap="humanChooseRow" data-row="{{item.index}}">
+        <view class="choice-info">
+          <text class="choice-label">第{{item.label}}列（罚分：{{item.totalBulls}}🐂）</text>
+          <view class="choice-cards">
+            <view wx:for="{{item.cards}}" wx:for-item="mc" wx:key="index" class="mini-card">
+              <text>{{mc.num}}</text>
+            </view>
+          </view>
+        </view>
+        <text class="choice-arrow">→ 收走</text>
+      </view>
+    </view>
+  </view>
+</view>
+
+<!-- ==================== 结算弹窗 ==================== -->
+<view wx:if="{{showEndModal}}" class="modal-mask" catchtap="">
+  <view class="modal-box">
+    <text class="modal-title">🏆 游戏结束！</text>
+    <text class="modal-desc">{{endDesc}}</text>
+    <view class="ranking-list">
+      <view wx:for="{{endRanking}}" wx:key="index"
+        class="rank-row {{index === 0 ? 'winner' : ''}} {{item.isYou ? 'you-row' : ''}}">
+        <text>{{item.medal}} {{item.name}}{{item.isYou ? '（你）' : ''}}</text>
+        <text>{{item.score}}🐂</text>
+      </view>
+    </view>
+    <button class="btn-warning" bindtap="retryGame">再来一局 🔄</button>
+    <button class="btn-gray" style="margin-top:16rpx;" bindtap="leaveRoom">返回大厅 🏠</button>
+  </view>
+</view>
+
