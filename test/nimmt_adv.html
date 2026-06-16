@@ -157,6 +157,7 @@
   .log-entry.penalty { color: #f3722c; }
   .log-entry.you { color: #f9c74f; }
   .log-entry.system { color: #4cc9f0; }
+  .log-entry.warn { color: #f8961e; font-style: italic; }
 
   /* ===== Modals ===== */
   .modal-overlay {
@@ -362,7 +363,7 @@
 <div id="rowModal" class="modal-overlay" style="display:none">
   <div class="modal">
     <h2>😱 你的牌最小！</h2>
-    <p>你的牌比所有列末尾都小，必须选一列收走（你将获得该列的牛头罚分）</p>
+    <p>你的牌比所有列末尾都小，必须选一列收走。<br>选罚分少的列，损失最小！</p>
     <div id="rowChoices" class="row-choices"></div>
   </div>
 </div>
@@ -386,6 +387,7 @@ const MULTI_SERVER = "";   // PHP 后端，同源（相对路径）
 const API_BASE = "/nimmt_api/nimmt_multi.php";  // PHP API 入口
 let pollTs = 0;   // long poll timestamp
 let polling = false;
+let roomInfoCheckTimer = null;  // 定期检查房间状态（兜底）
 
 const TOTAL = 100, NUM_ROWS = 5, MAX_ROW = 6, HAND_SIZE = 10, END_SCORE = 66;
 
@@ -432,33 +434,24 @@ let ws = null;
 //  Server Health Check
 // ============================================================
 async function checkServerHealth() {
-  var el = document.getElementById("srvStatus");
-  var icon = document.getElementById("srvIcon");
-  var txt = document.getElementById("srvText");
+  // Note: The lobby screen doesn't have a dedicated server status element,
+  // so we just silently check connectivity. Errors will be visible when
+  // the user tries to create/join a room.
   try {
     var controller = new AbortController();
     var timer = setTimeout(function(){ controller.abort(); }, 8000);
     const res = await fetch(API_BASE + "?action=room_info&room_id=_health_", { signal: controller.signal });
     clearTimeout(timer);
     if (res.ok) {
-      // Server responded - it's online regardless of room existence
-      el.className = "server-status ok";
-      icon.textContent = "✅";
-      txt.textContent = "Server 在线 (PHP)";
+      console.log("[Health] Server online (PHP)");
     } else {
       throw new Error("HTTP " + res.status);
     }
   } catch(e) {
     var msg = e.message || "";
     // Don't show "Room not found" as offline - server is actually working
-    if (msg.indexOf("Room not found") !== -1 || msg.indexOf("Aborted") !== -1) {
-      el.className = "server-status ok";
-      icon.textContent = "✅";
-      txt.textContent = "Server 在线 (PHP)";
-    } else {
-      el.className = "server-status bad";
-      icon.textContent = "❌";
-      txt.textContent = "Server 离线 (" + msg + ")";
+    if (msg.indexOf("Room not found") === -1 && msg.indexOf("Aborted") === -1) {
+      console.warn("[Health] Server may be offline:", msg);
     }
   }
 }
@@ -634,19 +627,29 @@ function startPolling() {
   if (polling || !state.roomId) return;
   polling = true;
   pollLoop();
+  // 每5秒检查一次房间状态（兜底：防止 game_over 消息丢失）
+  if (roomInfoCheckTimer) clearInterval(roomInfoCheckTimer);
+  roomInfoCheckTimer = setInterval(checkRoomInfo, 5000);
 }
 
 function stopPolling() {
   polling = false;
+  if (roomInfoCheckTimer) { clearInterval(roomInfoCheckTimer); roomInfoCheckTimer = null; }
 }
 
 function pollLoop() {
   if (!polling || !state.roomId) return;
 
   var url = API_BASE + "?action=poll&room_id=" + state.roomId + "&player_id=" + state.playerId + "&since=" + pollTs;
+  var controller = new AbortController();
+  // Auto-timeout for long poll: slightly longer than server $POLL_TIMEOUT to avoid cutting off valid responses
+  var timeoutTimer = setTimeout(function() { controller.abort(); }, 30000);
 
-  fetch(url, { signal: AbortController.signal })
-    .then(function(r) { return r.json(); })
+  fetch(url, { signal: controller.signal })
+    .then(function(r) {
+      clearTimeout(timeoutTimer);
+      return r.json();
+    })
     .then(function(data) {
       if (data.messages && data.messages.length > 0) {
         if (data.ts) pollTs = data.ts;
@@ -657,9 +660,44 @@ function pollLoop() {
       if (polling) setTimeout(pollLoop, 200);
     })
     .catch(function(err) {
+      clearTimeout(timeoutTimer);
+      // AbortError is expected when we stop polling or timeout, not a real error
+      if (err.name === 'AbortError') {
+        if (polling) setTimeout(pollLoop, 500); // re-poll on timeout
+        return;
+      }
       console.error("[Poll] error:", err);
       if (polling) setTimeout(pollLoop, 2000);
     });
+}
+
+// 兜底：定期从 room_info 检查游戏是否已结束（防止 game_over 消息丢失）
+function checkRoomInfo() {
+  if (!polling || !state.roomId) return;
+  // 只在游戏进行中检查
+  if (state.phase !== 'playing' && state.phase !== 'pick_row') return;
+  fetch(API_BASE + '?action=room_info&room_id=' + state.roomId)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data || data.error) return;
+      if (data.phase === 'finished' && state.phase !== 'finished') {
+        console.log('[Fallback] Detected game finished via room_info, showing results...');
+        // 优先用服务器返回的玩家列表（防止本地 state.players 不完整）
+        var playerList = (data.players && data.players.length > 0) ? data.players : state.players;
+        var ranking = [];
+        playerList.forEach(function(p) {
+          var pid = p.id || p.player_id;
+          var s = (data.scores && data.scores[pid] !== undefined) ? data.scores[pid] : (state.scores[pid] || 0);
+          ranking.push({ name: p.name, score: s, isYou: (pid === state.playerId), player_id: pid });
+        });
+        ranking.sort(function(a, b) { return a.score - b.score; });
+        state.phase = 'finished';
+        showEndModal(ranking);
+        setActionMsg('\uD83C\uDFC6 Game Over!');
+        addLog('\uD83C\uDFC6 游戏结束！', 'system');
+      }
+    })
+    .catch(function(e) { /* ignore */ });
 }
 
 // ==================== 修复后的 sendToServer ====================
@@ -767,17 +805,17 @@ function handleServerMessage(msg) {
       }
       renderAll();
       // Safety net: if we're the last player (remaining=0), round_end should arrive next.
-      if (parseInt(msg.remaining) === 0) {
-        (function() {
-          var prevPhase = state.phase;
-          setTimeout(function() {
-            if (state.phase === prevPhase && state.phase === "playing") {
-              console.log("[Safety] round_end not received, forcing poll refresh");
-              pollTs = 0;  // reset timestamp to re-fetch all messages
-            }
-          }, 2000);
-        })();
-      }
+      // NOTE: Do NOT reset pollTs=0 here! That causes delivered messages to be missed.
+      // The room_info periodic check (checkRoomInfo) handles the fallback case.
+      break;
+
+    case "card_placed":
+      // 结算动作广播：显示到日志，更新牌桌和记分
+      if (msg.log_msg) addLog(msg.log_msg, msg.log_cls || "");
+      if (msg.rows) state.rows = msg.rows;
+      if (msg.scores) state.scores = msg.scores;
+      renderRows();
+      renderScoreboard();
       break;
 
     case "must_pick_row":
@@ -786,7 +824,7 @@ function handleServerMessage(msg) {
       // Use rows_snapshot for concurrency safety (prevents two players seeing stale row data)
       state.rows = msg.rows || state.rows;
       state._rowsSnapshot = msg.rows_snapshot || "";
-      setActionMsg("\u1F631 你的牌最小，请选择收走的列！");
+      setActionMsg("\uD83D\uDE31 你的牌 <b>" + msg.card + "</b> 最小，请选择要收走的一列！");
       showRowModal();
       renderRows();
       break;
@@ -795,7 +833,11 @@ function handleServerMessage(msg) {
       state.round = msg.round;
       state.rows = msg.rows || [];
       state.scores = msg.scores || state.scores;
-      state.logs = (msg.logs || []).slice(0, 60);
+      // 若本地日志为空（重连/刷新场景），从服务器快照恢复；否则保留本地实时日志
+      if (state.logs.length === 0 && msg.logs && msg.logs.length > 0) {
+        state.logs = msg.logs.slice().reverse(); // 服务器是正序，本地是倒序（最新在上）
+        if (state.logs.length > 60) state.logs = state.logs.slice(0, 60);
+      }
       state.phase = "playing";
       state.selectedCard = null;
       setActionMsg("\uD83C\uDCAF 第 " + msg.round + " 轮 \u2014 点击你的牌出牌");
@@ -808,12 +850,21 @@ function handleServerMessage(msg) {
       state.rows = msg.rows || [];
       state.scores = msg.scores || state.scores;
       state.phase = "playing";
+      if (msg.auto) {
+        // 超时自动代选：提示玩家
+        const autoName = (state.players.find(p => p.id === msg.player_id) || {}).name || msg.player_id;
+        addLog(`⏰ ${autoName} 超时未选列，AI 自动代选第${(msg.row + 1)}列`, 'warn');
+      }
       renderAll();
       break;
 
     case "game_over":
       state.phase = "finished";
-      state.logs = (msg.logs || []).slice(0, 60);
+      // 若本地日志为空（重连场景），从服务器快照恢复；否则保留本地实时日志
+      if (state.logs.length === 0 && msg.logs && msg.logs.length > 0) {
+        state.logs = msg.logs.slice().reverse();
+        if (state.logs.length > 60) state.logs = state.logs.slice(0, 60);
+      }
       showEndModal(msg.ranking || []);
       setActionMsg("\uD83C\uDFC6 Game Over!");
       break;
@@ -832,7 +883,8 @@ function startGame() {
 
 function leaveRoom() {
   stopPolling();
-  state = { phase: "lobby", playerId: "", myName: "", roomId: "", players: [], isHost: false, hand: [], rows: [], scores: {}, round: 1, selectedCard: null, logs: [] };
+  state = { phase: "lobby", playerId: "", myName: "", roomId: "", players: [], isHost: false, hand: [], rows: [], scores: {}, round: 1, selectedCard: null, logs: [], playedCards: {}, _rowsSnapshot: "", numHumans: 2, numAI: 2, choosingForCard: null };
+  pollTs = 0;
   showScreen("lobby");
 }
 
@@ -971,14 +1023,14 @@ function renderAction() {
     if (state.selectedCard) {
       msgEl.innerHTML = '\u5df2\u9009\u62e9\uff1a' + cardHTML(state.selectedCard,"","") +
         ' <span style="color:#aaa;font-size:0.85rem">\u70b9\u51fb\u5176\u4ed6\u724c\u91cd\u65b0\u9009\u62e9</span>';
-      btnsEl.innerHTML = '<button class="btn btn-primary" onclick="confirmPlay()\u3000">\u51fa\u8fd9\u5f20\u724c ✔</button>';
+      btnsEl.innerHTML = '<button class="btn btn-primary" onclick="confirmPlay()">\u51fa\u8fd9\u5f20\u724c ✔</button>';
     } else {
       msgEl.innerHTML = '<span style="color:#aaa">\uD83D\uDC46 \u70b9\u51fb\u4f60\u7684\u624b\u724c\u9009\u4e00\u5f20\u51fa</span>';
       btnsEl.innerHTML = "";
     }
   } else if (state.phase === "pick_row") {
-    msgEl.innerHTML = "\u1F631 \u4f60\u7684\u724c <b>" + (state.choosingForCard||"") + "</b> \u6700\u5c0f\uff0c\u8bf7\u9009\u62e9\u6536\u8d70\u7684\u5217";
-    btnsEl.innerHTML = "";
+    msgEl.innerHTML = "\uD83D\uDE31 你的牌 <b style='color:#f9c74f;font-size:1.2rem'>" + (state.choosingForCard||"") + "</b> 最小，请在弹窗中选择要收走的一列";
+    btnsEl.innerHTML = '<button class="btn btn-warning" onclick="showRowModal()">\uD83D\uDCCB 选择列</button>';
   } else if (state.phase === "finished") {
     msgEl.innerHTML = "\uD83C\uDFC6 Game Over!";
     btnsEl.innerHTML = "";
@@ -1011,13 +1063,22 @@ function addLog(msg, cls) {
 
 function showRowModal() {
   var el = document.getElementById("rowChoices");
+  // 更新弹框标题：带上要打出的牌
+  var modalTitle = document.querySelector("#rowModal .modal h2");
+  if (modalTitle) {
+    modalTitle.innerHTML = "\uD83D\uDE31 你的牌 <span style='color:#f9c74f'>" + (state.choosingForCard||"") + "</span> 最小！";
+  }
   el.innerHTML = state.rows.map(function(row, r) {
     var b = rowBulls(row);
     var cards = row.map(function(c) { return miniCardHTML(c); }).join("");
+    var dangerColor = b >= 5 ? '#f3722c' : b >= 3 ? '#e67e22' : '#888';
     return '<div class="row-choice-btn" onclick="humanChooseRow(' + r + ')">' +
-      '<div><div style="font-size:0.8rem;color:#aaa;margin-bottom:4px">\u5217' + (r+1) + ' (\u7f5a\u5206\uff1a' + b + '\U0001f402)</div>' +
-      '<div class="row-choice-cards">' + cards + '</div></div>' +
-      '<div style="color:#f3722c;font-size:1.2rem">\u2192 \u6536\u8d70</div></div>';
+      '<div>' +
+        '<div style="font-size:0.8rem;color:#aaa;margin-bottom:6px">第' + (r+1) + '列 &nbsp;<span style="color:' + dangerColor + ';font-weight:bold">罚分：' + b + ' \uD83D\uDC02</span></div>' +
+        '<div class="row-choice-cards">' + cards + '</div>' +
+      '</div>' +
+      '<div style="color:#f3722c;font-size:1.1rem;font-weight:bold">\u2192 收走</div>' +
+    '</div>';
   }).join("");
   document.getElementById("rowModal").style.display = "flex";
 }
@@ -1027,18 +1088,20 @@ function hideRowModal() {
 }
 
 function showEndModal(ranking) {
-  var medals = ["\uD83E\uDD47","\uD83E\uDD48","\uD83E\uDD49","4️⃣","5️⃣","6️⃣"];
+  var medals = ["\uD83E\uDD47","\uD83E\uDD48","\uD83E\uDD49","4\uFE0F\u20E3","5\uFE0F\u20E3","6\uFE0F\u20E3"];
   document.getElementById("endTitle").textContent = "\uD83C\uDFC6 Game Over!";
-  document.getElementById("endDesc").textContent = "";
 
   var meIdx = ranking.findIndex(function(r) { return r.isYou; });
-  var desc = meIdx >= 0 ? ("\u4f60\u6392\u540d\u7B2C " + (meIdx+1)) : "";
+  var desc = "";
+  if (meIdx === 0) desc = "\uD83C\uDFC6 你是最强的！牛头最少！";
+  else if (meIdx >= 0) desc = "\u4f60\u6392\u540d\u7B2C " + (meIdx + 1) + " \u540d";
   document.getElementById("endDesc").textContent = desc;
 
   document.getElementById("endRanking").innerHTML = ranking.map(function(info, i) {
-    return '<div class="ranking-row ' + (i===0?'winner':'') + ' ' + (info.isYou?'you-row':'') + '">' +
-      '<span>' + medals[i] + ' ' + info.name + (info.isYou?' (you)':'') + '</span>' +
-      '<span>' + info.score + ' \uD83D\uDC02</span></div>';
+    var isYou = !!info.isYou;
+    return '<div class="ranking-row ' + (i===0?'winner':'') + ' ' + (isYou?'you-row':'') + '">' +
+      '<span>' + (medals[i] || (i+1)+'.') + ' ' + info.name + (isYou ? ' \u2b50(\u4f60)' : '') + '</span>' +
+      '<span style="color:' + (i===0?'#f9c74f':'#f3722c') + '">' + info.score + ' \uD83D\uDC02</span></div>';
   }).join("");
   document.getElementById("endModal").style.display = "flex";
 }
