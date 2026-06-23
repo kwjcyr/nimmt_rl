@@ -13,17 +13,17 @@
     <view class="config-row">
       <text class="config-label">👤 真实玩家数</text>
       <view class="num-ctrl">
-        <view class="num-btn" bindtap="adjHumans" data-d="-1">−</view>
+        <view class="num-btn" bindtap="adjHumans" data-d="{{-1}}">−</view>
         <text class="num-val">{{numHumans}}</text>
-        <view class="num-btn" bindtap="adjHumans" data-d="1">+</view>
+        <view class="num-btn" bindtap="adjHumans" data-d="{{1}}">+</view>
       </view>
     </view>
     <view class="config-row">
       <text class="config-label">🤖 AI 玩家数</text>
       <view class="num-ctrl">
-        <view class="num-btn" bindtap="adjAI" data-d="-1">−</view>
+        <view class="num-btn" bindtap="adjAI" data-d="{{-1}}">−</view>
         <text class="num-val">{{numAI}}</text>
-        <view class="num-btn" bindtap="adjAI" data-d="1">+</view>
+        <view class="num-btn" bindtap="adjAI" data-d="{{1}}">+</view>
       </view>
     </view>
     <text class="config-total {{totalValid ? '' : 'error'}}">总计：{{numHumans + numAI}} 人（2~6人，真实玩家≥1）</text>

@@ -173,7 +173,7 @@ Page({
   },
 
   adjHumans: function(e) {
-    var d = e.currentTarget.dataset.d;
+    var d = parseInt(e.currentTarget.dataset.d, 10);
     var v = Math.max(1, Math.min(6, this.data.numHumans + d));  // 允许最少1个真实玩家
     var ai = this.data.numAI;
     this.setData({
@@ -183,7 +183,7 @@ Page({
   },
 
   adjAI: function(e) {
-    var d = e.currentTarget.dataset.d;
+    var d = parseInt(e.currentTarget.dataset.d, 10);
     var v = Math.max(0, Math.min(5, this.data.numAI + d));
     var h = this.data.numHumans;
     this.setData({
