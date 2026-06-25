@@ -1,6 +1,7 @@
 # 🐂 牛头王 6 Nimmt!
 
-> 经典桌游《6 Nimmt!》的数字实现版本，支持命令行对战、网页对战，以及三种强化学习策略（Q-Learning、DQN、PPO）训练、对比与 Arena 人机对战。
+> 经典桌游《6 Nimmt!》的数字实现版本，支持命令行对战、网页对战、微信小程序，以及三种强化学习策略（Q-Learning、DQN、PPO）训练、对比与 Arena 人机对战。
+> 支持通过微信小程序收集真实人类对局轨迹，经由行为克隆 → PPO 强化学习闭环迭代，让 AI 越玩越强。
 
 ---
 
@@ -9,31 +10,39 @@
 ```
 nimmt/
 ├── index.html               # 单机网页版（推荐，浏览器直接打开）
+├── simple/
+│   └── nimmt_simple.cpp     # 最简 C++ 实现（理解核心逻辑，类似 LeetCode 风格）
 ├── ql/
 │   └── nimmt_ql.py          # Q-Learning 强化学习训练 + 对战
 ├── dqn/
 │   └── nimmt_dqn.py         # DQN（深度 Q 网络）训练 + 对战
 ├── ppo/
-│   └── nimmt_ppo.py         # PPO（近端策略优化）训练 + 对战
+│   ├── nimmt_ppo.py         # PPO（近端策略优化）训练 + 对战
+│   ├── nimmt_ppo_traj.py    # PPO + 行为克隆（支持真实轨迹训练）
+│   ├── ppo_step.md          # 完整闭环训练流程指南
+│   └── trajectories/human/  # 人类对局轨迹存放目录（.gitignore 保护）
 ├── interactive/
 │   ├── nimmt.py             # 命令行版（1人类 + 5 规则AI）
 │   ├── nimmt_arena.py       # Arena 对战：真人 vs PPO/DQN/QL/规则AI
 │   └── nimmt_compare.py     # 三种 RL 一键训练 + 胜率对比
 ├── server/
-│   └── nimmt_multi.php      # 多人在线对战后端（PHP Long Polling）
+│   └── nimmt_multi.php      # 多人在线对战 + 轨迹上报后端（PHP Long Polling）
 ├── test/
-│   ├── arena.html           # Arena 网页前端（Codelab 对战）
 │   ├── nimmt_adv.html       # 多人在线对战前端（支持人类 + AI 混合房间）
+│   ├── nimmt_traj_admin.html # 轨迹管理后台（统计 / 按日期下载）
 │   ├── admin.html           # 房间管理后台页面
 │   └── test_model.py        # 模型加载验证脚本
 ├── miniprogram/             # 微信小程序版
 │   ├── app.js / app.json / app.wxss
-│   ├── pages/index/         # 小程序首页
-│   └── project.config.json
+│   └── pages/
+│       ├── solo/            # 单机模式（含轨迹自动上报）
+│       └── multi/           # 多人联机模式（含轨迹自动上报）
 ├── models/
 │   ├── nimmt_q_table.pkl    # 训练好的 Q 表
 │   ├── nimmt_dqn_model.pth  # 训练好的 DQN 模型
-│   └── nimmt_ppo_model.pth  # 训练好的 PPO 模型
+│   ├── nimmt_ppo_model.pth  # 训练好的 PPO 模型
+│   ├── bc_backbone.pth      # 行为克隆主干网络
+│   └── bc_actor.pth         # 行为克隆 Actor 头
 ├── requirements.txt         # Python 依赖
 └── README.md
 ```
@@ -68,6 +77,33 @@ nimmt/
 
 - 任意玩家累计牛头超过 **66 分**时游戏结束
 - **牛头最少**者获胜 🏆
+
+---
+
+## 🧩 最简实现：`simple/nimmt_simple.cpp`
+
+如果你想快速理解游戏核心逻辑（类似 LeetCode 刷题的感觉），直接看这个文件。
+
+它用不到 130 行 C++ 实现了牛头王的**完整放牌机制**：
+
+```cpp
+// 核心：给定一批出牌，依次处理三种情况
+void addPokers(vector<int> pokers) {
+    for (int poker : pokers) {
+        // 找到每列末尾最大值，确认 poker 该放哪里
+        // case 1: 比所有列末尾都小 → 收走最短列，从头开始
+        // case 2: 正常放入 → 找最近的列追加
+        // case 3: 第7张触发 → 收走该列，poker 成为新列头
+    }
+}
+```
+
+| 操作 | 命令 |
+|------|------|
+| 编译 | `g++ -std=c++20 simple/nimmt_simple.cpp -o nimmt_simple` |
+| 运行 | `./nimmt_simple` |
+
+没有得分统计，没有 AI，只有最纯粹的**放牌规则演示**。适合作为理解项目其他部分的起点。
 
 ---
 
@@ -459,4 +495,76 @@ pip install -r requirements.txt
 - 📱 **原生小程序体验** — 微信内直接运行，开箱即玩
 
 > 联机后端部署于 `https://kwjcyr.com`，SSL 证书由 Let's Encrypt 自动签发续期。
+
+---
+
+## 🔄 AI 自我进化：小程序轨迹 → 训练闭环
+
+这是本项目最核心的特性：**你每一局的真实出牌，都会成为训练 AI 的数据**。
+
+### 闭环原理
+
+```
+小程序对局（单机 / 多人）
+       ↓ 游戏结束自动上报轨迹
+kwjcyr.com 后端存储
+       ↓ 管理台按日期下载 JSON
+行为克隆（BC）训练
+  → 模型学习你的出牌风格
+       ↓
+PPO 强化学习微调
+  → 在自我对弈中进一步优化
+       ↓
+更强的 AI 回到小程序作为对手
+  → 产生更高质量的新数据
+       ↓ （循环）
+```
+
+**玩的局数越多，AI 越聪明。**
+
+### 快速上手训练流程
+
+#### 第一步：积累数据
+玩小程序 solo / 多人模式，每局结束自动上报。访问管理台下载轨迹文件：
+
+```
+https://kwjcyr.com/nimmt_traj_admin
+```
+
+把下载的文件放入 `ppo/trajectories/human/`。
+
+#### 第二步：行为克隆（学习人类风格）
+
+```bash
+python ppo/nimmt_ppo_traj.py behavior_clone \
+  ppo/trajectories/human/*.json 50
+```
+
+生成 `models/bc_backbone.pth` 和 `models/bc_actor.pth`。
+
+> 建议至少积累 **50 局**后再训练，BC loss 降到 0.6 以下效果明显。
+
+#### 第三步：PPO 强化学习微调
+
+```bash
+# 从行为克隆模型起步（推荐）
+python ppo/nimmt_ppo_traj.py train --load-bc
+
+# 继续已有 PPO 模型
+python ppo/nimmt_ppo_traj.py train
+```
+
+默认训练 30000 局，胜率稳定在 20%+ 后可停止（`Ctrl+C` 自动保存）。
+
+#### 第四步：验证效果
+
+```bash
+# 终端人机对战，顺便产生新轨迹
+python ppo/nimmt_ppo_traj.py human
+
+# 纯 AI 对战展示
+python ppo/nimmt_ppo_traj.py play
+```
+
+> 📖 完整说明见 [`ppo/ppo_step.md`](ppo/ppo_step.md)
 
