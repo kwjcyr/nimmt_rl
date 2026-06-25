@@ -56,6 +56,43 @@ BC_MODEL_PATH = os.path.join(_MODELS_DIR, "bc_model.pth")
 
 AI_STRATEGIES = ["greedy", "safe", "greedy", "random", "safe"]
 
+# Self-Play 历史模型池大小（最多保留多少个快照）
+SELF_PLAY_POOL_SIZE = 5
+
+
+# =========================================================
+#  Self-Play 历史模型池
+# =========================================================
+class SelfPlayPool:
+    """
+    维护一组历史 PPO 模型快照。
+    训练过程中每隔固定局数保存当前模型，对局时随机抽一个历史版本作为对手。
+    这迫使当前策略持续对抗「过去的自己」，不断弥补弱点，胜率上限显著提升。
+    """
+    def __init__(self, max_size=SELF_PLAY_POOL_SIZE):
+        self.max_size = max_size
+        self._snapshots: list[dict] = []  # 存 state_dict 副本
+
+    def snapshot(self, net: nn.Module):
+        """保存当前网络权重到池中（超出容量则丢弃最旧的）"""
+        sd = {k: v.clone().cpu() for k, v in net.state_dict().items()}
+        self._snapshots.append(sd)
+        if len(self._snapshots) > self.max_size:
+            self._snapshots.pop(0)
+
+    def sample_agent(self) -> 'ActorCritic | None':
+        """随机返回一个历史快照（临时网络），若池为空则返回 None"""
+        if not self._snapshots:
+            return None
+        sd = random.choice(self._snapshots)
+        net = ActorCritic()
+        net.load_state_dict(sd)
+        net.eval()
+        return net
+
+    def __len__(self):
+        return len(self._snapshots)
+
 
 def get_bulls(card):
     if card == 55: return 7
@@ -168,14 +205,22 @@ class ActorCritic(nn.Module):
         value = self.critic_head(feat).squeeze(-1)
         return logit, value
 
-    def get_action(self, state_vec, n_valid):
+    def get_action(self, state_vec, n_valid, epsilon=0.0):
+        """
+        选取动作。
+        epsilon: ε-greedy 探索率，以 epsilon 概率完全随机选牌（训练时传入小值如 0.01）。
+        """
         x      = torch.FloatTensor(state_vec).unsqueeze(0)
         logit, value = self(x)
         mask = torch.full((1, ACTION_DIM), float('-inf'))
         mask[0, :n_valid] = 0.0
         logit_masked = logit + mask
         dist   = Categorical(logits=logit_masked)
-        action = dist.sample()
+        # ε-greedy：以 epsilon 概率强制均匀随机探索
+        if epsilon > 0.0 and random.random() < epsilon:
+            action = torch.tensor(random.randint(0, n_valid - 1))
+        else:
+            action = dist.sample()
         return (action.item(),
                 dist.log_prob(action),
                 dist.entropy(),
@@ -371,18 +416,33 @@ class PPOAgent:
         print(f"📂 已加载行为克隆模型: backbone={backbone_path}, actor={actor_path}")
 
 # =========================================================
-#  在线训练一局（原版）
+#  在线训练一局（支持 Self-Play + ε-greedy 探索）
 # =========================================================
-def run_episode(agent, training=True):
+def run_episode(agent, training=True, self_play_pool: 'SelfPlayPool | None' = None,
+                self_play_ratio=0.6, epsilon=0.01):
+    """
+    运行一局对战。
+    self_play_pool : SelfPlayPool 实例，若提供则部分对手使用历史 PPO 模型。
+    self_play_ratio: 用历史模型替换规则 AI 的比例（0.6 = 5 个对手中约 3 个用历史模型）。
+    epsilon        : ε-greedy 探索率（训练时生效），避免陷入局部最优。
+    """
     hands, rows = shuffle_deal()
     scores = [0] * NUM_PLAYERS
+
+    # 为每个对手决定策略：历史 PPO 快照 or 规则 AI
+    opponent_nets = [None] * NUM_PLAYERS  # index 0 是当前 agent，不需要
+    if self_play_pool and len(self_play_pool) > 0:
+        for i in range(1, NUM_PLAYERS):
+            if random.random() < self_play_ratio:
+                opponent_nets[i] = self_play_pool.sample_agent()  # 历史 PPO
+            # else: None → 使用规则 AI
 
     for step in range(HAND_SIZE):
         state = encode_state(hands[0], rows, scores[0])
         n = len(hands[0])
 
         if training:
-            action_idx, logprob, entropy, value = agent.net.get_action(state, n)
+            action_idx, logprob, entropy, value = agent.net.get_action(state, n, epsilon=epsilon)
         else:
             action_idx = agent.get_action_eval(hands[0], rows, scores[0])
             logprob, value = None, None
@@ -390,7 +450,18 @@ def run_episode(agent, training=True):
         chosen = [None] * NUM_PLAYERS
         chosen[0] = hands[0][action_idx]
         for i in range(1, NUM_PLAYERS):
-            chosen[i] = ai_choose_card(hands[i], rows, AI_STRATEGIES[i-1])
+            onet = opponent_nets[i]
+            if onet is not None:
+                # 历史 PPO 对手：贪心评估模式（argmax，不探索）
+                s_i = encode_state(hands[i], rows, scores[i])
+                n_i = len(hands[i])
+                x_i = torch.FloatTensor(s_i).unsqueeze(0)
+                with torch.no_grad():
+                    logit_i, _ = onet(x_i)
+                logit_i[0, n_i:] = float('-inf')
+                chosen[i] = hands[i][int(torch.argmax(logit_i[0, :n_i]).item())]
+            else:
+                chosen[i] = ai_choose_card(hands[i], rows, AI_STRATEGIES[i-1])
         for i in range(NUM_PLAYERS):
             hands[i].remove(chosen[i])
 
@@ -428,11 +499,15 @@ def run_episode(agent, training=True):
 
     return scores[0], agent_rank
 
-def train(episodes=30000, from_scratch=False, load_bc=False):
+def train(episodes=30000, from_scratch=False, load_bc=False, blend_bc=False,
+          self_play=False, epsilon=0.01):
     """
     在线训练 PPO。
-    - from_scratch: 若 True 则完全随机初始化
-    - load_bc: 若 True 则加载行为克隆模型作为初始策略（需先训练 BC）
+    - from_scratch : 若 True 则完全随机初始化
+    - load_bc      : 若 True 则用 BC 模型权重替换 backbone+actor（丢弃旧 PPO Critic）
+    - blend_bc     : 若 True 则加载完整 PPO 模型后，先做 BC 监督预热再 PPO 微调
+    - self_play    : 若 True 则开启 Self-Play，部分对手使用历史 PPO 快照（推荐）
+    - epsilon      : ε-greedy 探索率，训练时以此概率随机出牌（默认 0.01 = 1%）
     """
     agent = PPOAgent()
 
@@ -456,28 +531,91 @@ def train(episodes=30000, from_scratch=False, load_bc=False):
     elif not bc_loaded and not from_scratch:
         print("🆕 未找到已有模型，从头开始训练...")
 
+    # blend_bc：在完整 PPO 模型基础上，先用 BC 数据做监督预热（warm-up）
+    # 这样既保留了 Critic 的价值估计，又把人类出牌风格注入到 Actor
+    if blend_bc:
+        bc_json_dir = os.path.join(os.path.dirname(__file__), "trajectories", "human")
+        import glob
+        bc_paths = glob.glob(os.path.join(bc_json_dir, "*.json"))
+        if not bc_paths:
+            print("⚠️  blend_bc: 未找到人类轨迹文件，跳过 BC 预热")
+        else:
+            print(f"🔀 blend_bc: 先用 {len(bc_paths)} 个轨迹文件做 BC 监督预热 (20 epochs)...")
+            # 收集样本
+            states, actions = [], []
+            for jp in bc_paths:
+                with open(jp, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if isinstance(data, dict) and 'trajectories' in data:
+                    games = data['trajectories']
+                elif isinstance(data, list):
+                    games = data
+                else:
+                    games = [data]
+                for game in games:
+                    for sv, ai in _extract_samples_from_game(game):
+                        states.append(sv)
+                        actions.append(ai)
+            if states:
+                print(f"   共 {len(states)} 条样本，开始预热...")
+                X = torch.FloatTensor(np.array(states))
+                y = torch.LongTensor(actions)
+                ds = TensorDataset(X, y)
+                dl = DataLoader(ds, batch_size=32, shuffle=True)
+                # 只更新 backbone + actor，保留 critic 权重不变
+                bc_params = list(agent.net.backbone.parameters()) + list(agent.net.actor_head.parameters())
+                bc_opt = optim.Adam(bc_params, lr=5e-4, weight_decay=1e-3)
+                criterion = nn.CrossEntropyLoss()
+                agent.net.train()
+                for epoch in range(20):
+                    total_loss = 0
+                    for xb, yb in dl:
+                        bc_opt.zero_grad()
+                        logits, _ = agent.net(xb)
+                        loss = criterion(logits, yb)
+                        loss.backward()
+                        bc_opt.step()
+                        total_loss += loss.item()
+                    if (epoch + 1) % 5 == 0:
+                        print(f"   BC 预热 Epoch {epoch+1}/20, Loss={total_loss/len(dl):.4f}")
+                print("✅ BC 预热完成，继续 PPO 在线训练...")
+
+    # Self-Play 模型池（仅在 self_play=True 时启用）
+    sp_pool = SelfPlayPool() if self_play else None
+    # Self-Play 快照频率：每 N 局保存一次当前模型到池中
+    SP_SNAPSHOT_EVERY = 2000
+
+    sp_tag = "🔄 Self-Play" if self_play else "📋 规则AI对手"
     print("=" * 60)
     print("🧠 牛头王 PPO 在线训练")
-    print(f"   局数: {episodes}  |  Actor-Critic 共享主干 128×128")
+    print(f"   局数: {episodes}  |  对手模式: {sp_tag}  |  ε={epsilon}")
     print("=" * 60)
 
     penalties, ranks = [], []
     update_every = 10  # 每 10 局更新一次，积累足够样本降低梯度方差
 
     for ep in range(1, episodes + 1):
-        pen, rank = run_episode(agent, training=True)
+        pen, rank = run_episode(agent, training=True,
+                                self_play_pool=sp_pool,
+                                self_play_ratio=0.6,
+                                epsilon=epsilon)
         penalties.append(pen)
         ranks.append(rank)
 
         if ep % update_every == 0:
             agent.update()
 
+        # Self-Play：定期把当前模型存入历史池
+        if sp_pool is not None and ep % SP_SNAPSHOT_EVERY == 0:
+            sp_pool.snapshot(agent.net)
+
         if ep % 2000 == 0:
             avg_pen  = sum(penalties[-2000:]) / 2000
             avg_rank = sum(ranks[-2000:]) / 2000 + 1
             win_rate = ranks[-2000:].count(0) / 2000 * 100
+            pool_info = f" | 历史池={len(sp_pool)}" if sp_pool else ""
             print(f"  Ep {ep:6d} | 平均罚分={avg_pen:.1f}🐂 | "
-                  f"平均排名={avg_rank:.2f} | 胜率={win_rate:.1f}%")
+                  f"平均排名={avg_rank:.2f} | 胜率={win_rate:.1f}%{pool_info}")
 
     agent.save(MODEL_PATH)
     print("\n✅ PPO 训练完成！")
@@ -1060,7 +1198,22 @@ if __name__ == "__main__":
     if len(args) >= 1 and args[0] == "train":
         from_scratch = "--from-scratch" in args
         load_bc = "--load-bc" in args
-        train(from_scratch=from_scratch, load_bc=load_bc)
+        blend_bc = "--blend-bc" in args
+        self_play = "--self-play" in args
+        episodes = 30000
+        epsilon = 0.01
+        for arg in args[1:]:
+            if arg.startswith("--episodes="):
+                episodes = int(arg.split("=")[1])
+            elif arg.startswith("--epsilon="):
+                epsilon = float(arg.split("=")[1])
+            elif arg.startswith("--episodes") and args.index(arg) + 1 < len(args):
+                try:
+                    episodes = int(args[args.index(arg) + 1])
+                except ValueError:
+                    pass
+        train(episodes=episodes, from_scratch=from_scratch, load_bc=load_bc,
+              blend_bc=blend_bc, self_play=self_play, epsilon=epsilon)
     elif len(args) >= 1 and args[0] == "play":
         save_path = None
         if len(args) >= 3 and args[1] == "--save":

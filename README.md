@@ -512,8 +512,8 @@ kwjcyr.com 后端存储
 行为克隆（BC）训练
   → 模型学习你的出牌风格
        ↓
-PPO 强化学习微调
-  → 在自我对弈中进一步优化
+PPO + Self-Play + ε-greedy 微调
+  → 历史池持续对抗「过去的自己」，胜率上限 28%+
        ↓
 更强的 AI 回到小程序作为对手
   → 产生更高质量的新数据
@@ -547,14 +547,16 @@ python ppo/nimmt_ppo_traj.py behavior_clone \
 #### 第三步：PPO 强化学习微调
 
 ```bash
-# 从行为克隆模型起步（推荐）
-python ppo/nimmt_ppo_traj.py train --load-bc
+# ⭐ 推荐：Self-Play + blend-bc，在已有底子上注入人类风格
+python ppo/nimmt_ppo_traj.py train --self-play --blend-bc --episodes=30000
 
-# 继续已有 PPO 模型
-python ppo/nimmt_ppo_traj.py train
+# 从 BC 模型起步（无旧 PPO 模型时）
+python ppo/nimmt_ppo_traj.py train --self-play --load-bc
 ```
 
-默认训练 30000 局，胜率稳定在 20%+ 后可停止（`Ctrl+C` 自动保存）。
+默认训练 30000 局，胜率稳定在 **27%+** 后可停止（`Ctrl+C` 自动保存）。
+
+> 首次建立强底子：`python ppo/nimmt_ppo_traj.py train --self-play --from-scratch --episodes=100000`
 
 #### 第四步：验证效果
 

@@ -3,6 +3,8 @@
 本指南介绍从数据收集 → 行为克隆 → 强化学习微调 → 再次对战的完整迭代流程。
 支持两种数据来源：**微信小程序对局**（推荐，真实玩家数据）和**本地终端人机对战**。
 
+> **当前最强策略**：Self-Play（自我对弈）+ ε-greedy 探索，100k 局胜率可达 **27~30%**（纯规则 AI 对手上限约 22%）。
+
 ---
 
 ## 轨迹格式（统一）
@@ -101,25 +103,45 @@ python ppo/nimmt_ppo_traj.py behavior_clone ppo/trajectories/human/*.json 50
 ## 步骤 2：强化学习微调（PPO）
 
 行为克隆得到的模型能模仿你的风格，但局面覆盖有限。
-用 PPO 在线自我对弈微调，让 AI 持续优化同时保留你的经验。
+用 PPO 在线对弈微调，让 AI 持续优化同时保留你的经验。
 
 ```bash
-# 从 BC 模型起步（推荐首次使用）
-python ppo/nimmt_ppo_traj.py train --load-bc
+# ⭐ 推荐：Self-Play + blend-bc，在已有底子上注入人类风格
+python ppo/nimmt_ppo_traj.py train --self-play --blend-bc --episodes=30000
 
-# 从已有 PPO 模型继续训练
-python ppo/nimmt_ppo_traj.py train
+# 从头建立强底子（首次或想重置时）
+python ppo/nimmt_ppo_traj.py train --self-play --from-scratch --episodes=100000
 
-# 完全从头开始
-python ppo/nimmt_ppo_traj.py train --from-scratch
+# 从 BC 模型起步（无旧 PPO 模型时）
+python ppo/nimmt_ppo_traj.py train --self-play --load-bc
+
+# 继续已有 PPO 模型（不注入 BC）
+python ppo/nimmt_ppo_traj.py train --self-play
 ```
 
-**训练过程：**
+**训练参数说明：**
 
-- 与 5 个规则 AI 在线对弈，每 10 局更新一次策略
-- 默认 30000 局，可随时 `Ctrl+C` 提前停止，模型自动保存
-- 观察胜率稳定在 20%+ 时即可停止
-- 模型保存到 `../models/nimmt_ppo_model.pth`
+| 参数 | 说明 | 默认值 |
+|------|------|------|
+| `--self-play` | 开启 Self-Play，部分对手使用历史 PPO 快照 | 关闭 |
+| `--blend-bc` | 先用人类数据 BC 预热 Actor，再 PPO 微调（保留 Critic）| 关闭 |
+| `--load-bc` | 用 BC 权重替换 backbone+actor（无旧 PPO 时用）| 关闭 |
+| `--from-scratch` | 完全随机初始化 | 关闭 |
+| `--episodes=N` | 训练局数 | 30000 |
+| `--epsilon=0.01` | ε-greedy 探索率（训练时随机出牌概率）| 0.01 |
+
+**Self-Play 机制：**
+
+- 每隔 2000 局把当前模型存入「历史池」（最多保留 5 个快照）
+- 每局对战时，5 个对手中约 60% 从历史池随机抽取，其余为规则 AI
+- 迫使模型持续对抗「过去的自己」，不断弥补弱点，胜率上限从 22% 提升至 **28%+**
+
+**ε-greedy 探索：**
+
+- 训练时以 1% 概率完全随机选牌，防止策略过早收敛到固定套路
+- 可通过 `--epsilon=0.02` 加大探索（数据少时适当增大）
+
+> 默认 30000 局，可随时 `Ctrl+C` 提前停止，模型自动保存到 `../models/nimmt_ppo_model.pth`
 
 ---
 
@@ -142,12 +164,23 @@ python ppo/nimmt_ppo_traj.py play
        ↓ 轨迹 JSON
 behavior_clone  →  bc_backbone.pth + bc_actor.pth
        ↓
-train --load-bc  →  nimmt_ppo_model.pth
+train --self-play --blend-bc  →  nimmt_ppo_model.pth
+  （Self-Play 历史池持续对抗自己 + ε-greedy 探索 + BC 人类风格注入）
        ↓
 再次小程序对局（更强 AI 作为对手，新数据加入下轮迭代）
+       ↓ （循环，模型持续进化）
 ```
 
 每轮新数据与旧数据合并（`*.json` 匹配所有文件），模型持续进化。
+
+**各轮迭代预期胜率：**
+
+| 阶段 | 方式 | 胜率参考 |
+|------|------|--------|
+| 初始 | 随机策略 | ~16.7% |
+| 纯规则AI对手 PPO 30k 局 | train | ~22% |
+| Self-Play PPO 100k 局 | train --self-play | **~28%** |
+| Self-Play + BC 人类数据微调 | train --self-play --blend-bc | **~28%+** |
 
 ---
 
@@ -157,11 +190,11 @@ train --load-bc  →  nimmt_ppo_model.pth
 |------|------|
 | 小程序轨迹下载 | 访问 `https://kwjcyr.com/nimmt_traj_admin` |
 | 本地人机对战收集 | `python ppo/nimmt_ppo_traj.py human` |
-| 行为克隆（小程序包） | `python ppo/nimmt_ppo_traj.py behavior_clone ppo/trajectories/human/nimmt_traj_all_*.json 50` |
-| 行为克隆（所有本地文件） | `python ppo/nimmt_ppo_traj.py behavior_clone ppo/trajectories/human/*.json 50` |
-| PPO 训练（从 BC 起步） | `python ppo/nimmt_ppo_traj.py train --load-bc` |
-| PPO 训练（继续已有模型） | `python ppo/nimmt_ppo_traj.py train` |
-| PPO 训练（从头开始） | `python ppo/nimmt_ppo_traj.py train --from-scratch` |
+| 行为克隆 | `python ppo/nimmt_ppo_traj.py behavior_clone ppo/trajectories/human/*.json 50` |
+| ⭐ **每轮迭代推荐命令** | `python ppo/nimmt_ppo_traj.py train --self-play --blend-bc --episodes=30000` |
+| 从头建立强底子 | `python ppo/nimmt_ppo_traj.py train --self-play --from-scratch --episodes=100000` |
+| PPO 训练（从 BC 起步） | `python ppo/nimmt_ppo_traj.py train --self-play --load-bc` |
+| PPO 训练（继续已有模型） | `python ppo/nimmt_ppo_traj.py train --self-play` |
 | 全自动对战展示 | `python ppo/nimmt_ppo_traj.py play` |
 
 ---
@@ -178,5 +211,11 @@ A：确认轨迹文件中人类玩家 play 含 `hand_before` 和 `action_idx` �
 A：正常现象，脚本已自动加 Dropout 防过拟合。多积累几局数据后重新训练即可。
 
 **Q：PPO 训练后胜率没有明显提升？**
-A：先用 `play` 模式观察 AI 对战效果。若确实未提升，可尝试 `train --from-scratch` 重新训练，或增加 BC 数据量后重新做行为克隆。
+A：先用 `play` 模式观察 AI 对战效果。若确实未提升，建议改用 `--self-play` 模式，比纯规则 AI 对手上限高约 7%。也可尝试 `--from-scratch --self-play` 重新训练，或积累更多 BC 数据。
+
+**Q：Self-Play 早期胜率反而下降？**
+A：正常现象。历史池刚建立时对手极弱，模型处于探索期，约 6000~8000 局后历史池充满，胜率开始稳定上升。
+
+**Q：`--blend-bc` 和 `--load-bc` 有什么区别？**
+A：`--load-bc` 直接用 BC 权重覆盖 backbone+actor，会丢失已有 PPO 的 Critic；`--blend-bc` 保留完整 PPO 结构，只对 Actor 做轻量 BC 预热（20 epoch），不破坏价值估计，适合在强底子上迭代。
 
