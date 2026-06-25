@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐂 牛头王 · 轨迹管理台</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    background: #1a1a2e; color: #eee; min-height: 100vh;
+  }
+  #app { max-width: 1100px; margin: 0 auto; padding: 16px 16px 80px; }
+
+  h1 {
+    text-align: center; font-size: 2rem; margin: 18px 0 4px;
+    background: linear-gradient(135deg, #4cc9f0, #4361ee);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .subtitle { text-align: center; color: #aaa; font-size: 0.85rem; margin-bottom: 20px; }
+
+  /* ── Control Bar ── */
+  .ctrl-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: #16213e; border: 1px solid #0f3460;
+    border-radius: 12px; padding: 12px 16px; margin-bottom: 20px;
+  }
+  .ctrl-label { font-size: 0.82rem; color: #aaa; }
+  .day-btn {
+    padding: 5px 14px; border-radius: 20px; border: 1px solid #0f3460;
+    background: #0a0a1a; color: #ccc; cursor: pointer; font-size: 0.82rem;
+    transition: all 0.15s;
+  }
+  .day-btn:hover, .day-btn.active { border-color: #4cc9f0; color: #4cc9f0; background: #0d1b2a; }
+  .refresh-btn {
+    margin-left: auto; padding: 5px 16px; border-radius: 20px;
+    border: 1px solid #4361ee; background: transparent; color: #4cc9f0;
+    cursor: pointer; font-size: 0.82rem; transition: all 0.15s;
+  }
+  .refresh-btn:hover { background: #4361ee22; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; transition: background 0.3s; }
+  .status-dot.ok  { background: #2ecc71; }
+  .status-dot.err { background: #e74c3c; }
+  .status-dot.loading { background: #f9c74f; animation: pulse 0.8s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  /* ── Summary Cards ── */
+  .summary-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px; margin-bottom: 24px;
+  }
+  .sumcard {
+    background: #16213e; border: 1px solid #0f3460; border-radius: 12px;
+    padding: 16px 14px; text-align: center;
+    transition: border-color 0.25s, transform 0.15s;
+  }
+  .sumcard:hover { border-color: #4cc9f0; transform: translateY(-2px); }
+  .sumcard .val {
+    font-size: 2rem; font-weight: 700; line-height: 1.1;
+    background: linear-gradient(135deg, #4cc9f0, #4361ee);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .sumcard.solo  .val { background: linear-gradient(135deg, #90e0ef, #48cae4); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .sumcard.multi .val { background: linear-gradient(135deg, #f9c74f, #f3722c); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .sumcard.steps .val { background: linear-gradient(135deg, #a8dadc, #457b9d); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .sumcard .lbl { font-size: 0.75rem; color: #888; margin-top: 4px; }
+
+  /* ── Section Title ── */
+  .sec-hd {
+    font-size: 0.88rem; color: #aaa; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sec-hd::after { content:''; flex:1; height:1px; background:#0f3460; }
+
+  /* ── Chart ── */
+  .chart-wrap {
+    background: #16213e; border: 1px solid #0f3460;
+    border-radius: 12px; padding: 16px 16px 8px; margin-bottom: 24px; overflow-x: auto;
+  }
+  .chart-tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+  .chart-tab {
+    padding: 3px 12px; border-radius: 12px; border: 1px solid #0f3460;
+    background: #0a0a1a; color: #888; cursor: pointer; font-size: 0.78rem; transition: all 0.15s;
+  }
+  .chart-tab.active { border-color: #4cc9f0; color: #4cc9f0; background: #0d1b2a; }
+  #chart-canvas { display: block; width: 100%; height: 220px; }
+
+  /* ── Detail Table ── */
+  .tbl-wrap {
+    background: #16213e; border: 1px solid #0f3460;
+    border-radius: 12px; overflow: hidden; margin-bottom: 24px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+  thead { background: #0f3460; }
+  thead th { padding: 9px 12px; text-align: right; color: #aaa; font-weight: 500; }
+  thead th:first-child { text-align: left; }
+  thead th.th-check { text-align: center; width: 36px; }
+  tbody tr { border-bottom: 1px solid #0f3460; transition: background 0.15s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: #0d1b2a; }
+  tbody td { padding: 8px 12px; text-align: right; }
+  tbody td:first-child { text-align: left; font-family: monospace; color: #4cc9f0; }
+  tbody td.td-check { text-align: center; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.72rem; }
+  .badge.solo  { background: #0d2a38; color: #90e0ef; border: 1px solid #48cae4; }
+  .badge.multi { background: #2a1a00; color: #f9c74f; border: 1px solid #f3722c; }
+  .zero { color: #555; }
+  .today-row td:first-child { color: #f9c74f; }
+  .today-row { background: #1e1a0a !important; }
+  .sel-row { background: #0d2038 !important; }
+
+  /* ── Row Checkbox ── */
+  input[type=checkbox].row-chk {
+    width: 15px; height: 15px; accent-color: #4cc9f0; cursor: pointer;
+  }
+
+  /* ── Download Panel ── */
+  .dl-panel {
+    background: #16213e; border: 1px solid #0f3460;
+    border-radius: 12px; padding: 18px 20px; margin-bottom: 24px;
+  }
+  .dl-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .dl-info {
+    font-size: 0.82rem; color: #aaa;
+    flex: 1; min-width: 160px;
+  }
+  .dl-info strong { color: #4cc9f0; }
+  .src-btns { display: flex; gap: 6px; }
+  .src-btn {
+    padding: 5px 14px; border-radius: 20px; border: 1px solid #0f3460;
+    background: #0a0a1a; color: #ccc; cursor: pointer; font-size: 0.82rem; transition: all 0.15s;
+  }
+  .src-btn:hover { border-color: #4cc9f0; color: #4cc9f0; }
+  .src-btn.active { border-color: #4cc9f0; color: #4cc9f0; background: #0d1b2a; }
+  .src-btn.solo-src.active  { border-color: #48cae4; color: #90e0ef; background: #0d2a38; }
+  .src-btn.multi-src.active { border-color: #f3722c; color: #f9c74f; background: #2a1a00; }
+  .dl-btn {
+    padding: 8px 22px; border-radius: 20px;
+    border: none; background: linear-gradient(135deg, #4361ee, #4cc9f0);
+    color: #fff; cursor: pointer; font-size: 0.88rem; font-weight: 600;
+    transition: opacity 0.15s, transform 0.1s;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .dl-btn:hover { opacity: 0.88; transform: translateY(-1px); }
+  .dl-btn:active { transform: translateY(0); }
+  .dl-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .dl-btn .dl-spin {
+    width: 14px; height: 14px; border: 2px solid #ffffff44;
+    border-top-color: #fff; border-radius: 50%;
+    animation: spin 0.7s linear infinite; display: none;
+  }
+  .dl-btn.loading .dl-spin { display: block; }
+  .sel-hint { font-size: 0.75rem; color: #555; margin-top: 8px; }
+  .sel-all-btn {
+    font-size: 0.75rem; color: #4cc9f0; background: none; border: none;
+    cursor: pointer; text-decoration: underline; padding: 0;
+  }
+
+  /* ── Loading / Error ── */
+  .placeholder { text-align: center; padding: 60px 20px; color: #555; font-size: 0.9rem; }
+  .spinner {
+    width: 28px; height: 28px; border: 3px solid #0f3460;
+    border-top-color: #4cc9f0; border-radius: 50%;
+    animation: spin 0.7s linear infinite; margin: 0 auto 12px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: #16213e; border: 1px solid #4cc9f0; color: #4cc9f0;
+    padding: 8px 22px; border-radius: 20px; font-size: 0.85rem;
+    opacity: 0; transition: opacity 0.3s, transform 0.3s; pointer-events: none; z-index: 999;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.err  { border-color: #e74c3c; color: #e74c3c; }
+
+  @media (max-width: 600px) {
+    .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    .sumcard .val  { font-size: 1.5rem; }
+    thead th:nth-child(n+5), tbody td:nth-child(n+5) { display: none; }
+    .dl-btn { width: 100%; justify-content: center; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>🐂 牛头王 · 轨迹管理台</h1>
+  <p class="subtitle">实时统计玩家对局数 &amp; 轨迹收集情况，支持按天下载</p>
+
+  <!-- 控制栏 -->
+  <div class="ctrl-bar">
+    <span class="ctrl-label">时间范围：</span>
+    <button class="day-btn" data-days="7">近 7 天</button>
+    <button class="day-btn active" data-days="30">近 30 天</button>
+    <button class="day-btn" data-days="60">近 60 天</button>
+    <button class="day-btn" data-days="90">近 90 天</button>
+    <div class="status-dot loading" id="dot"></div>
+    <span id="status-txt" style="font-size:0.78rem;color:#888">加载中…</span>
+    <button class="refresh-btn" id="btn-refresh">↻ 刷新</button>
+  </div>
+
+  <!-- 汇总卡片 -->
+  <div class="summary-grid" id="summary-grid">
+    <div class="placeholder" style="grid-column:1/-1">
+      <div class="spinner"></div>正在拉取数据…
+    </div>
+  </div>
+
+  <!-- 趋势图 -->
+  <p class="sec-hd">每日趋势</p>
+  <div class="chart-wrap">
+    <div class="chart-tabs">
+      <button class="chart-tab active" data-metric="total">总局数</button>
+      <button class="chart-tab" data-metric="solo">单机</button>
+      <button class="chart-tab" data-metric="multi">多人</button>
+      <button class="chart-tab" data-metric="rounds">轮数</button>
+      <button class="chart-tab" data-metric="human_steps">训练样本</button>
+    </div>
+    <canvas id="chart-canvas"></canvas>
+  </div>
+
+  <!-- 下载面板 -->
+  <p class="sec-hd">轨迹下载</p>
+  <div class="dl-panel">
+    <div class="dl-row">
+      <div class="dl-info">
+        已选 <strong id="sel-count">0</strong> 天
+        （<strong id="sel-traj-count">0</strong> 条轨迹）
+      </div>
+      <div class="src-btns">
+        <span class="ctrl-label">来源：</span>
+        <button class="src-btn active" data-src="all">全部</button>
+        <button class="src-btn solo-src" data-src="solo">单机</button>
+        <button class="src-btn multi-src" data-src="multi">多人</button>
+      </div>
+      <button class="dl-btn" id="dl-btn" disabled>
+        <div class="dl-spin"></div>
+        ⬇ 下载 JSON
+      </button>
+    </div>
+    <p class="sel-hint">
+      在下方表格勾选日期行，再点击下载。
+      <button class="sel-all-btn" id="sel-all-btn">全选当前视图</button>
+      &nbsp;·&nbsp;
+      <button class="sel-all-btn" id="sel-none-btn">取消全选</button>
+    </p>
+  </div>
+
+  <!-- 明细表 -->
+  <p class="sec-hd">逐日明细</p>
+  <div class="tbl-wrap" id="tbl-wrap">
+    <div class="placeholder"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const API_BASE = 'https://kwjcyr.com/nimmt_api/nimmt_multi.php';
+
+let _days   = 30;
+let _data   = null;
+let _metric = 'total';
+let _selDates = new Set();   // 已选日期 key (YYYYMMDD)
+let _dlSrc  = 'all';
+
+// ── Init ──
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.day-btn').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('.day-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    _days = parseInt(btn.dataset.days);
+    _selDates.clear();
+    loadData();
+  }));
+
+  document.getElementById('btn-refresh').addEventListener('click', loadData);
+
+  document.querySelectorAll('.chart-tab').forEach(tab => tab.addEventListener('click', () => {
+    document.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    _metric = tab.dataset.metric;
+    if (_data) drawChart(_data.daily, _metric);
+  }));
+
+  document.querySelectorAll('.src-btn').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('.src-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    _dlSrc = btn.dataset.src;
+    updateSelInfo();
+  }));
+
+  document.getElementById('dl-btn').addEventListener('click', doDownload);
+  document.getElementById('sel-all-btn').addEventListener('click', () => {
+    if (!_data) return;
+    _selDates.clear();
+    _data.daily.forEach(d => { if (d.total > 0) _selDates.add(dateKey(d.date)); });
+    renderTable(_data.daily);
+    updateSelInfo();
+  });
+  document.getElementById('sel-none-btn').addEventListener('click', () => {
+    _selDates.clear();
+    renderTable(_data.daily);
+    updateSelInfo();
+  });
+
+  loadData();
+});
+
+// ── Load Data ──
+async function loadData() {
+  setStatus('loading', '加载中…');
+  try {
+    const res = await fetch(`${API_BASE}?action=traj_stats&days=${_days}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    _data = await res.json();
+    render(_data);
+    setStatus('ok', `已更新 ${ts()}`);
+  } catch (e) {
+    setStatus('err', '请求失败：' + e.message);
+    showError(e.message);
+  }
+}
+
+function setStatus(state, msg) {
+  document.getElementById('dot').className = 'status-dot ' + state;
+  document.getElementById('status-txt').textContent = msg;
+}
+function ts() {
+  const d = new Date();
+  return [d.getHours(),d.getMinutes(),d.getSeconds()].map(v=>String(v).padStart(2,'0')).join(':');
+}
+function dateKey(dateStr) { return dateStr.replace(/-/g, ''); } // "2026-06-25" -> "20260625"
+
+// ── Render ──
+function render(data) {
+  renderSummary(data.summary);
+  drawChart(data.daily, _metric);
+  renderTable(data.daily);
+  updateSelInfo();
+}
+
+function renderSummary(s) {
+  const today = new Date().toISOString().slice(0,10);
+  const todayStat = _data && _data.daily ? _data.daily.find(d => d.date === today) : null;
+  document.getElementById('summary-grid').innerHTML = `
+    <div class="sumcard">
+      <div class="val">${fmt(s.total)}</div>
+      <div class="lbl">总轨迹数（${_days}天）</div>
+    </div>
+    <div class="sumcard solo">
+      <div class="val">${fmt(s.solo)}</div>
+      <div class="lbl">单机局数</div>
+    </div>
+    <div class="sumcard multi">
+      <div class="val">${fmt(s.multi)}</div>
+      <div class="lbl">多人局数</div>
+    </div>
+    <div class="sumcard">
+      <div class="val">${fmt(s.rounds)}</div>
+      <div class="lbl">总轮次数</div>
+    </div>
+    <div class="sumcard steps">
+      <div class="val">${fmt(s.human_steps)}</div>
+      <div class="lbl">训练样本步数</div>
+    </div>
+    <div class="sumcard" style="border-color:#f9c74f44">
+      <div class="val" style="background:linear-gradient(135deg,#f9c74f,#90be6d);-webkit-background-clip:text;-webkit-text-fill-color:transparent">
+        ${todayStat ? fmt(todayStat.total) : '0'}
+      </div>
+      <div class="lbl">今日局数</div>
+    </div>`;
+}
+
+function fmt(n) {
+  if (n == null) return '–';
+  if (n >= 10000) return (n/10000).toFixed(1)+'w';
+  if (n >= 1000)  return (n/1000).toFixed(1)+'k';
+  return n;
+}
+
+// ── Chart ──
+function drawChart(daily, metric) {
+  const canvas = document.getElementById('chart-canvas');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.offsetWidth || canvas.parentElement.offsetWidth || 800;
+  const H = 220;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const PAD = { top: 16, right: 20, bottom: 44, left: 44 };
+  const CW = W - PAD.left - PAD.right;
+  const CH = H - PAD.top  - PAD.bottom;
+  const vals = daily.map(d => d[metric] || 0);
+  const maxV = Math.max(...vals, 1);
+  ctx.fillStyle = '#16213e'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = '#0f3460'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = PAD.top + CH - (i / 4) * CH;
+    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(PAD.left + CW, y); ctx.stroke();
+    ctx.fillStyle = '#555'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(Math.round(maxV * i / 4), PAD.left - 4, y + 4);
+  }
+  const n = daily.length; if (n < 2) return;
+  const xStep = CW / (n - 1);
+  const grad = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + CH);
+  grad.addColorStop(0, 'rgba(76,201,240,0.3)'); grad.addColorStop(1, 'rgba(76,201,240,0.02)');
+  ctx.beginPath();
+  vals.forEach((v, i) => {
+    const x = PAD.left + i * xStep, y = PAD.top + CH - (v / maxV) * CH;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.lineTo(PAD.left + (n-1)*xStep, PAD.top+CH); ctx.lineTo(PAD.left, PAD.top+CH); ctx.closePath();
+  ctx.fillStyle = grad; ctx.fill();
+  ctx.beginPath(); ctx.strokeStyle = '#4cc9f0'; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+  vals.forEach((v, i) => {
+    const x = PAD.left + i * xStep, y = PAD.top + CH - (v / maxV) * CH;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+  const todayStr = new Date().toISOString().slice(0,10);
+  vals.forEach((v, i) => {
+    const x = PAD.left + i * xStep, y = PAD.top + CH - (v / maxV) * CH;
+    const isToday = daily[i].date === todayStr;
+    const isSel   = _selDates.has(dateKey(daily[i].date));
+    ctx.beginPath(); ctx.arc(x, y, isToday ? 5 : (isSel ? 4 : 3), 0, Math.PI*2);
+    ctx.fillStyle = isToday ? '#f9c74f' : (isSel ? '#a8e6cf' : '#4cc9f0'); ctx.fill();
+    if ((isToday || isSel) && v > 0) {
+      ctx.fillStyle = isToday ? '#f9c74f' : '#a8e6cf';
+      ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(v, x, y - 10);
+    }
+  });
+  ctx.fillStyle = '#555'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+  const step = Math.ceil(n / 10);
+  daily.forEach((d, i) => {
+    if (i % step !== 0 && i !== n-1) return;
+    const x = PAD.left + i * xStep;
+    ctx.fillStyle = d.date === todayStr ? '#f9c74f' : (_selDates.has(dateKey(d.date)) ? '#a8e6cf' : '#555');
+    ctx.fillText(d.date.slice(5), x, H - PAD.bottom + 16);
+  });
+}
+
+// ── Table ──
+function renderTable(daily) {
+  const todayStr = new Date().toISOString().slice(0,10);
+  const rows = [...daily].reverse();
+  const html = `
+  <table>
+    <thead>
+      <tr>
+        <th class="th-check"><input type="checkbox" id="chk-all-hd" title="全选/取消"></th>
+        <th>日期</th>
+        <th>总局数</th>
+        <th><span class="badge solo">单机</span></th>
+        <th><span class="badge multi">多人</span></th>
+        <th>轮次数</th>
+        <th>训练样本</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows.map(d => {
+        const isToday = d.date === todayStr;
+        const key = dateKey(d.date);
+        const isSel = _selDates.has(key);
+        const hasData = d.total > 0;
+        return `<tr class="${isToday ? 'today-row' : ''} ${isSel ? 'sel-row' : ''}" data-key="${key}" data-total="${d.total}">
+          <td class="td-check">
+            <input type="checkbox" class="row-chk" data-key="${key}" data-total="${d.total}" ${isSel?'checked':''} ${!hasData?'disabled':''}>
+          </td>
+          <td>${d.date}${isToday ? ' 🟡' : ''}</td>
+          <td>${d.total > 0 ? d.total : `<span class="zero">—</span>`}</td>
+          <td>${d.solo  > 0 ? d.solo  : `<span class="zero">—</span>`}</td>
+          <td>${d.multi > 0 ? d.multi : `<span class="zero">—</span>`}</td>
+          <td>${d.rounds > 0 ? d.rounds : `<span class="zero">—</span>`}</td>
+          <td>${d.human_steps > 0 ? d.human_steps : `<span class="zero">—</span>`}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+  document.getElementById('tbl-wrap').innerHTML = html;
+
+  // 行 checkbox 事件
+  document.querySelectorAll('.row-chk').forEach(chk => {
+    chk.addEventListener('change', () => {
+      const key = chk.dataset.key;
+      chk.checked ? _selDates.add(key) : _selDates.delete(key);
+      chk.closest('tr').classList.toggle('sel-row', chk.checked);
+      updateSelInfo();
+      if (_data) drawChart(_data.daily, _metric);
+    });
+  });
+
+  // 表头全选
+  const hdChk = document.getElementById('chk-all-hd');
+  if (hdChk) {
+    hdChk.addEventListener('change', () => {
+      document.querySelectorAll('.row-chk:not(:disabled)').forEach(c => {
+        c.checked = hdChk.checked;
+        const key = c.dataset.key;
+        hdChk.checked ? _selDates.add(key) : _selDates.delete(key);
+        c.closest('tr').classList.toggle('sel-row', hdChk.checked);
+      });
+      updateSelInfo();
+      if (_data) drawChart(_data.daily, _metric);
+    });
+  }
+}
+
+// ── Selection Info ──
+function updateSelInfo() {
+  const count = _selDates.size;
+  document.getElementById('sel-count').textContent = count;
+
+  // 计算选中日期里的轨迹数（根据来源过滤）
+  let trajCount = 0;
+  if (_data && _data.daily) {
+    _data.daily.forEach(d => {
+      if (!_selDates.has(dateKey(d.date))) return;
+      if      (_dlSrc === 'solo')  trajCount += d.solo;
+      else if (_dlSrc === 'multi') trajCount += d.multi;
+      else                          trajCount += d.total;
+    });
+  }
+  document.getElementById('sel-traj-count').textContent = trajCount;
+
+  const btn = document.getElementById('dl-btn');
+  btn.disabled = (count === 0 || trajCount === 0);
+}
+
+// ── Download ──
+async function doDownload() {
+  if (_selDates.size === 0) return;
+  const btn = document.getElementById('dl-btn');
+  btn.disabled = true; btn.classList.add('loading');
+
+  const dateParam = [..._selDates].sort().join(',');
+  const url = `${API_BASE}?action=traj_download&date=${dateParam}&source=${_dlSrc}`;
+
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+
+    // 从 Content-Disposition 取文件名，或自己构造
+    let filename = 'nimmt_traj.json';
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="?([^"]+)"?/);
+    if (m) filename = m[1];
+
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+
+    showToast(`✅ 下载完成：${filename}`);
+  } catch (e) {
+    showToast('⚠️ 下载失败：' + e.message, true);
+  } finally {
+    btn.disabled = false; btn.classList.remove('loading');
+    updateSelInfo(); // 重新判断是否 disable
+  }
+}
+
+// ── Error ──
+function showError(msg) {
+  document.getElementById('summary-grid').innerHTML =
+    `<div class="placeholder" style="grid-column:1/-1;color:#e74c3c">
+      ⚠️ 数据加载失败：${msg}<br>
+      <small style="color:#666">请确认后端 traj_stats 接口已部署</small>
+    </div>`;
+  document.getElementById('tbl-wrap').innerHTML =
+    `<div class="placeholder" style="color:#e74c3c">—</div>`;
+}
+
+// ── Toast ──
+let _toastTimer = null;
+function showToast(msg, isErr=false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show' + (isErr ? ' err' : '');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { t.className = ''; }, 3500);
+}
+
+window.addEventListener('resize', () => { if (_data) drawChart(_data.daily, _metric); });
+</script>
+</body>
+</html>
+

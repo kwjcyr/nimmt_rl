@@ -3,6 +3,8 @@
 //  逻辑与 index.html 完全一致，移植自 miniprogram/pages/index
 // ============================================================
 
+var TRAJ_API = "https://kwjcyr.com/nimmt_api/nimmt_multi.php";
+
 var TOTAL = 100;
 var NUM_ROWS = 5;
 var MAX_ROW = 6;
@@ -186,12 +188,66 @@ Page({
     _pendingIdx: 0
   },
 
+  // ---- 内部轨迹缓冲（不放入 data，避免频繁 setData） ----
+  _traj: null,
+  _trajRoundBuf: null,  // 当前轮缓冲：等待 resolve 阶段填充 penalty/row_affected
+
+  // 静默上报轨迹，fire-and-forget，失败不影响主流程
+  _uploadTraj: function(traj) {
+    var self = this;
+    wx.showToast({ title: '上报中...', icon: 'none', duration: 1500 });
+    try {
+      wx.request({
+        url: TRAJ_API + '?action=traj_upload',
+        method: "POST",
+        header: { "Content-Type": "application/json" },
+        data: traj,
+        success: function(res) {
+          var ok = res.data && res.data.ok;
+          wx.showToast({ title: ok ? '✅ 轨迹已保存' : ('❌ ' + (res.data && res.data.error || 'fail')), icon: 'none', duration: 2000 });
+          console.log("[Traj] upload result:", res.data);
+        },
+        fail: function(err) {
+          wx.showToast({ title: '❌ 网络失败', icon: 'none', duration: 2000 });
+          console.log("[Traj] upload fail:", err.errMsg);
+        }
+      });
+    } catch(e) {
+      wx.showToast({ title: '❌ 异常:' + e, icon: 'none', duration: 2000 });
+      console.log("[Traj] upload exception:", e);
+    }
+  },
+
   goBack: function() {
     wx.navigateBack();
   },
 
   startGame: function() {
     var result = deal();
+
+    // 初始化本局轨迹缓冲
+    var now = new Date();
+    var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
+    var tsStr = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate()) + '_'
+              + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
+    var randHex = Math.floor(Math.random() * 0xffffff).toString(16);
+    this._traj = {
+      source: 'solo',
+      game_id: tsStr + '_' + randHex,
+      timestamp: now.toISOString(),
+      players: [
+        { id: 'human', type: 'human' },
+        { id: 'ai_greedy_1', type: 'rule', strategy: 'greedy' },
+        { id: 'ai_safe_2',   type: 'rule', strategy: 'safe'   },
+        { id: 'ai_greedy_3', type: 'rule', strategy: 'greedy' },
+        { id: 'ai_random_4', type: 'rule', strategy: 'random' },
+        { id: 'ai_safe_5',   type: 'rule', strategy: 'safe'   }
+      ],
+      initial_rows: result.rows.map(function(r) { return r.slice(); }),
+      rounds: []
+    };
+    this._trajRoundBuf = null;
+
     this.setData({
       phase: 'pick',
       _hands: result.hands,
@@ -232,6 +288,32 @@ Page({
       chosen[i] = aiChooseCard(this.data._hands[i], this.data._rows, AI_STRATEGIES[i - 1]);
     }
 
+    // ---- 轨迹：记录本轮各玩家的 hand_before 和出牌 ----
+    if (this._traj) {
+      var playerIds = ['human', 'ai_greedy_1', 'ai_safe_2', 'ai_greedy_3', 'ai_random_4', 'ai_safe_5'];
+      var playsArr = [];
+      for (var ti = 0; ti < NUM_PLAYERS; ti++) {
+        var play = {
+          player_id: playerIds[ti],
+          card_played: chosen[ti],
+          hand_before: this.data._hands[ti].slice(),
+          penalty: 0,        // resolve 阶段填充
+          row_affected: -1   // resolve 阶段填充
+        };
+        if (ti === 0) {
+          // 人类玩家额外记录 action_idx，用于行为克隆
+          play.action_idx = this.data._hands[0].indexOf(sc);
+        }
+        playsArr.push(play);
+      }
+      this._trajRoundBuf = {
+        round: this.data.round,
+        plays: playsArr,
+        scores_after: null  // resolveNext 全部完成后填充
+      };
+    }
+    // -------------------------------------------------------
+
     var newHands = [];
     for (var j = 0; j < NUM_PLAYERS; j++) {
       var h = this.data._hands[j].slice();
@@ -267,6 +349,14 @@ Page({
     var pi = this.data._pendingIdx;
 
     if (pi >= pq.length) {
+      // ---- 轨迹：本轮结束，填 scores_after 并归档 ----
+      if (this._traj && this._trajRoundBuf) {
+        this._trajRoundBuf.scores_after = this.data.scores.slice();
+        this._traj.rounds.push(this._trajRoundBuf);
+        this._trajRoundBuf = null;
+      }
+      // -------------------------------------------------
+
       var nr = this.data.round + 1;
       var hands0 = this.data._hands ? this.data._hands[0] : [];
       if (hands0.length === 0 || Math.max.apply(null, this.data.scores) >= END_SCORE) {
@@ -312,6 +402,11 @@ Page({
     var penalty = rowBulls(this.data._rows[r]);
     var newScores = this.data.scores.slice();
     newScores[pi] += penalty;
+    // ---- 轨迹 ----
+    if (this._trajRoundBuf) {
+      this._trajRoundBuf.plays[pi].penalty = penalty;
+      this._trajRoundBuf.plays[pi].row_affected = r;
+    }
     var newRows = this.data._rows.map(function(row) { return row.slice(); });
     newRows[r] = [card];
     var newLogs = this.data.logs.slice();
@@ -334,6 +429,11 @@ Page({
     var penalty = rowBulls(this.data._rows[br]);
     var newScores = this.data.scores.slice();
     newScores[pi] += penalty;
+    // ---- 轨迹 ----
+    if (this._trajRoundBuf) {
+      this._trajRoundBuf.plays[pi].penalty = penalty;
+      this._trajRoundBuf.plays[pi].row_affected = br;
+    }
     var newRows = this.data._rows.map(function(row) { return row.slice(); });
     newRows[br] = [card];
     var marker = pi === 0 ? '（你）' : '';
@@ -354,6 +454,11 @@ Page({
   },
 
   doPlaceCard: function(pi, card, br) {
+    // ---- 轨迹 ----
+    if (this._trajRoundBuf) {
+      this._trajRoundBuf.plays[pi].penalty = 0;
+      this._trajRoundBuf.plays[pi].row_affected = br;
+    }
     var newRows = this.data._rows.map(function(row) { return row.slice(); });
     newRows[br].push(card);
     var marker = pi === 0 ? '（你）' : '';
@@ -379,6 +484,11 @@ Page({
     var penalty = rowBulls(this.data._rows[r]);
     var newScores = this.data.scores.slice();
     newScores[0] += penalty;
+    // ---- 轨迹 ----
+    if (this._trajRoundBuf) {
+      this._trajRoundBuf.plays[0].penalty = penalty;
+      this._trajRoundBuf.plays[0].row_affected = r;
+    }
     var newRows = this.data._rows.map(function(row) { return row.slice(); });
     newRows[r] = [card];
     var newLogs = this.data.logs.slice();
@@ -403,6 +513,24 @@ Page({
     var winner = ranking[0];
     var humanRank = ranking.indexOf(0) + 1;
     var medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣"];
+
+    // ---- 轨迹：补充终局信息并上报 ----
+    console.log("[Traj] showEndModalFn, _traj=", this._traj ? 'ok rounds=' + (this._traj.rounds && this._traj.rounds.length) : 'NULL');
+    if (this._traj) {
+      try {
+        this._traj.final_scores = this.data.scores.slice();
+        this._traj.ranking = ranking.slice();
+        this._uploadTraj(this._traj);
+      } catch(e) {
+        wx.showToast({ title: '❌ finalize:' + e, icon: 'none', duration: 2000 });
+        console.log("[Traj] finalize error:", e);
+      }
+      this._traj = null;
+    } else {
+      wx.showToast({ title: '⚠️ _traj为null，未上报', icon: 'none', duration: 2500 });
+    }
+    // ------------------------------------
+
     this.setData({
       showEndModal: true,
       endTitle: winner === 0 ? "🎉 你赢了！" : PLAYER_NAMES[winner] + " 获胜！",

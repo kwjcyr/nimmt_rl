@@ -7,3 +7,11 @@ __pycache__/
 models/*.pth
 models/*.pkl
 
+# 人类轨迹数据（隐私 + 体积大）
+ppo/trajectories/human/*.json
+
+# 微信小程序配置（含 appid 等隐私信息）
+miniprogram/project.config.json
+miniprogram/project.private.config.json
+miniprogram/base/project.config.json
+miniprogram/base/project.private.config.json

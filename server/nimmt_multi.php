@@ -943,6 +943,209 @@ switch ($action) {
         echo json_encode(array('ok' => true, 'removed' => $removed));
         break;
 
+    // ============================================================
+    // traj_upload: 接收前端上报的对局轨迹，保存到文件
+    // 格式与 nimmt_ppo_traj.py 生成的 human_traj_*.json 完全一致
+    // ============================================================
+    case 'traj_upload':
+        $TRAJ_DIR = '/opt/nimmt/traj/';
+        @mkdir($TRAJ_DIR, 0777, true);
+
+        $body = @file_get_contents('php://input');
+        if (!$body) {
+            echo json_encode(array('ok' => false, 'error' => 'empty body'));
+            break;
+        }
+        $traj = @json_decode($body, true);
+        if (!$traj || !isset($traj['game_id'])) {
+            echo json_encode(array('ok' => false, 'error' => 'invalid json'));
+            break;
+        }
+
+        // 安全化 game_id，防路径穿越
+        $safeId = preg_replace('/[^a-zA-Z0-9_\-]/', '', $traj['game_id']);
+        if (!$safeId) $safeId = 'traj_' . time();
+
+        // 按日期分目录存储，便于按天捞数据
+        $dateDir = $TRAJ_DIR . date('Ymd') . '/';
+        @mkdir($dateDir, 0777, true);
+
+        // 来源标记：solo / multi，方便区分
+        $source = isset($traj['source']) ? preg_replace('/[^a-z]/', '', $traj['source']) : 'unknown';
+        $filename = $dateDir . $source . '_' . $safeId . '.json';
+
+        $ok = file_put_contents($filename, json_encode($traj));
+        echo json_encode(array('ok' => ($ok !== false)));
+        break;
+
+    // ============================================================
+    // traj_stats: 统计轨迹数据，支持按日期范围查询
+    // 返回：每日统计（轨迹数、局数、轮数、玩家数）+ 汇总
+    // ============================================================
+    case 'traj_stats':
+        date_default_timezone_set('Asia/Shanghai');
+        $TRAJ_DIR = '/opt/nimmt/traj/';
+        // 查询最近 N 天，默认 30
+        $days = isset($_GET['days']) ? max(1, min(90, intval($_GET['days']))) : 30;
+
+        $today = new DateTime();
+        $dailyStats = array();
+
+        for ($i = $days - 1; $i >= 0; $i--) {
+            $d = clone $today;
+            $d->modify("-{$i} days");
+            $dateKey = $d->format('Ymd');
+            $dateLabel = $d->format('Y-m-d');
+            $dirPath = $TRAJ_DIR . $dateKey . '/';
+
+            $stat = array(
+                'date'       => $dateLabel,
+                'total'      => 0,   // 轨迹文件数
+                'solo'       => 0,   // 单机局数
+                'multi'      => 0,   // 多人局数
+                'rounds'     => 0,   // 总轮数
+                'players'    => 0,   // 总参与人数（含重复）
+                'human_steps'=> 0,   // 人类动作步数（可用于 BC 训练的样本数）
+            );
+
+            if (!is_dir($dirPath)) {
+                $dailyStats[] = $stat;
+                continue;
+            }
+
+            $files = glob($dirPath . '*.json');
+            if (!$files) { $dailyStats[] = $stat; continue; }
+
+            foreach ($files as $f) {
+                $raw = @file_get_contents($f);
+                if (!$raw) continue;
+                $traj = @json_decode($raw, true);
+                if (!$traj) continue;
+
+                $stat['total']++;
+                $source = isset($traj['source']) ? $traj['source'] : 'unknown';
+                if ($source === 'solo')       $stat['solo']++;
+                elseif ($source === 'multi')  $stat['multi']++;
+
+                // 轮数
+                if (isset($traj['rounds']) && is_array($traj['rounds'])) {
+                    $stat['rounds'] += count($traj['rounds']);
+                    // 人类动作步数
+                    foreach ($traj['rounds'] as $round) {
+                        if (!isset($round['plays'])) continue;
+                        foreach ($round['plays'] as $play) {
+                            $pid = isset($play['player_id']) ? $play['player_id'] : '';
+                            $isHuman = ($pid === 'human') ||
+                                       (isset($play['action_idx']) && $play['action_idx'] >= 0);
+                            if ($isHuman) $stat['human_steps']++;
+                        }
+                    }
+                }
+
+                // 玩家数（人类）
+                if (isset($traj['players']) && is_array($traj['players'])) {
+                    foreach ($traj['players'] as $p) {
+                        $type = isset($p['type']) ? $p['type'] : '';
+                        if ($type === 'human' || $type === 'ai') {
+                            // multi 版 type 字段用 'human'/'ai'，solo 版用 'human'/'rule'
+                        }
+                        if ($type === 'human') $stat['players']++;
+                    }
+                }
+            }
+
+            $dailyStats[] = $stat;
+        }
+
+        // 汇总
+        $summary = array(
+            'total'       => 0,
+            'solo'        => 0,
+            'multi'       => 0,
+            'rounds'      => 0,
+            'players'     => 0,
+            'human_steps' => 0,
+        );
+        foreach ($dailyStats as $s) {
+            $summary['total']        += $s['total'];
+            $summary['solo']         += $s['solo'];
+            $summary['multi']        += $s['multi'];
+            $summary['rounds']       += $s['rounds'];
+            $summary['players']      += $s['players'];
+            $summary['human_steps']  += $s['human_steps'];
+        }
+
+        echo json_encode(array(
+            'days'    => $days,
+            'summary' => $summary,
+            'daily'   => $dailyStats,
+        ));
+        break;
+
+    // ============================================================
+    // traj_download: 把指定日期（或多日期）的轨迹合并成一个 JSON 数组返回
+    // GET 参数:
+    //   date  = 20260625           (单天)
+    //   date  = 20260620,20260625  (多天，逗号分隔)
+    //   source= solo|multi|all     (来源过滤，默认 all)
+    // 返回 Content-Disposition: attachment，触发浏览器下载
+    // ============================================================
+    case 'traj_download':
+        date_default_timezone_set('Asia/Shanghai');
+        $TRAJ_DIR = '/opt/nimmt/traj/';
+
+        // 解析日期列表，最多 7 天，防止超大请求
+        $rawDates = isset($_GET['date']) ? $_GET['date'] : date('Ymd');
+        $dateList = array_slice(array_filter(array_map(function($d) {
+            $d = preg_replace('/[^0-9]/', '', trim($d));
+            return (strlen($d) === 8) ? $d : null;
+        }, explode(',', $rawDates))), 0, 7);
+
+        if (empty($dateList)) $dateList = array(date('Ymd'));
+
+        $sourceFilter = isset($_GET['source']) ? $_GET['source'] : 'all';
+        $sourceFilter = in_array($sourceFilter, array('solo','multi')) ? $sourceFilter : 'all';
+
+        $all = array();
+        foreach ($dateList as $dateKey) {
+            $dirPath = $TRAJ_DIR . $dateKey . '/';
+            if (!is_dir($dirPath)) continue;
+            $files = glob($dirPath . '*.json');
+            if (!$files) continue;
+            foreach ($files as $f) {
+                // 来源过滤：通过文件名前缀快速过滤，避免解析全量 JSON
+                if ($sourceFilter !== 'all') {
+                    $basename = basename($f);
+                    if (strpos($basename, $sourceFilter . '_') !== 0) continue;
+                }
+                $raw = @file_get_contents($f);
+                if (!$raw) continue;
+                $traj = @json_decode($raw, true);
+                if (!$traj) continue;
+                $all[] = $traj;
+            }
+        }
+
+        // 构造文件名
+        sort($dateList);
+        $fnDates = count($dateList) === 1 ? $dateList[0] : $dateList[0] . '_' . end($dateList);
+        $fnSource = $sourceFilter === 'all' ? 'all' : $sourceFilter;
+        $filename = 'nimmt_traj_' . $fnSource . '_' . $fnDates . '.json';
+
+        header('Content-Type: application/json; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Access-Control-Allow-Origin: *');
+        echo json_encode(array(
+            'meta' => array(
+                'dates'   => $dateList,
+                'source'  => $sourceFilter,
+                'count'   => count($all),
+                'generated_at' => date('Y-m-d H:i:s'),
+            ),
+            'trajectories' => $all,
+        ));
+        break;
+
     default:
         echo json_encode(array('error'=>'Unknown action'));
 }

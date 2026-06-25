@@ -144,6 +144,36 @@ Page({
   _afterCardCallbacks: [],
   _afterCheckTimer: null,
 
+  // ---- 轨迹缓冲 ----
+  _traj: null,           // 本局完整轨迹
+  _trajRound: null,      // 当前轮缓冲（等待 card_placed 填 penalty/row_affected）
+  _trajMyHandBefore: [], // confirmPlay 时记录的 hand_before（服务端结算后手牌已变）
+
+  // 静默上报轨迹，fire-and-forget
+  _uploadTraj: function(traj) {
+    wx.showToast({ title: '上报中...', icon: 'none', duration: 1500 });
+    try {
+      wx.request({
+        url: API_BASE + '?action=traj_upload',
+        method: "POST",
+        header: { "Content-Type": "application/json" },
+        data: traj,
+        success: function(res) {
+          var ok = res.data && res.data.ok;
+          wx.showToast({ title: ok ? '✅ 轨迹已保存' : ('❌ ' + (res.data && res.data.error || 'fail')), icon: 'none', duration: 2000 });
+          console.log("[Traj] upload result:", res.data);
+        },
+        fail: function(err) {
+          wx.showToast({ title: '❌ 网络失败', icon: 'none', duration: 2000 });
+          console.log("[Traj] upload fail:", err.errMsg);
+        }
+      });
+    } catch(e) {
+      wx.showToast({ title: '❌ 异常:' + e, icon: 'none', duration: 2000 });
+      console.log("[Traj] upload exception:", e);
+    }
+  },
+
   // ============================================================
   //  生命周期
   // ============================================================
@@ -363,6 +393,26 @@ Page({
     var card = this._state.selectedCard;
     if (!card) return;
 
+    // ---- 轨迹：记录出牌时的 hand_before 和 action_idx ----
+    if (this._traj) {
+      this._trajMyHandBefore = this._state.hand.slice();
+      // 初始化本轮缓冲（round_end 时会用服务端数据补充其他玩家）
+      this._trajRound = {
+        round: this._state.round || 1,
+        my_play: {
+          player_id: this._state.playerId,
+          card_played: card,
+          hand_before: this._state.hand.slice(),
+          action_idx: this._state.hand.indexOf(card),
+          penalty: 0,
+          row_affected: -1
+        },
+        plays: [],         // card_placed 消息逐个追加
+        scores_after: null
+      };
+    }
+    // ------------------------------------------------------
+
     // 发送到服务器
     this._sendToServer({ type: "play_card", card: card });
 
@@ -386,6 +436,10 @@ Page({
   humanChooseRow: function(e) {
     var r = parseInt(e.currentTarget.dataset.row);
     var card = this._state.choosingForCard;
+    // ---- 轨迹：记录人类主动选列（row_affected 在 pick_row 消息里确认，这里先记录意图） ----
+    if (this._traj && this._trajRound && this._trajRound.my_play) {
+      this._trajRound.my_play.row_affected = r;
+    }
     this.setData({ showRowModal: false });
     this._sendToServer({ type: "pick_row", row: r, card: card, rows_snapshot: this._state.rowsSnapshot });
     this.setData({ actionMsg: "⏳ 结算中..." });
@@ -593,6 +647,28 @@ Page({
             this._state.scores[msg.players[i].id] = msg.players[i].score || 0;
           }
         }
+
+        // ---- 轨迹：初始化本局缓冲 ----
+        (function(st, roomId) {
+          var now = new Date();
+          var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
+          var tsStr = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate()) + '_'
+                    + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
+          st._traj = {
+            source: 'multi',
+            game_id: tsStr + '_' + roomId,
+            timestamp: now.toISOString(),
+            players: (msg.players || []).map(function(p) {
+              return { id: p.id, name: p.name, type: p.is_ai ? 'ai' : 'human' };
+            }),
+            initial_rows: (msg.rows || []).map(function(r) { return r.slice(); }),
+            rounds: []
+          };
+          st._trajRound = null;
+          st._trajMyHandBefore = [];
+        })(this, this.data.roomId);
+        // --------------------------------
+
         this.setData({
           screen: "playing",
           round: this._state.round,
@@ -624,6 +700,29 @@ Page({
         break;
 
       case "card_placed":
+        // ---- 轨迹：记录每张牌结算结果 ----
+        if (this._traj && this._trajRound && msg.player_id) {
+          var cpEntry = {
+            player_id: msg.player_id,
+            card_played: msg.card,
+            penalty: msg.penalty || 0,
+            row_affected: (msg.row !== undefined) ? msg.row : -1
+          };
+          // 如果是我自己，补充 hand_before 和 action_idx
+          if (msg.player_id === this._state.playerId) {
+            cpEntry.hand_before = this._trajMyHandBefore.slice();
+            cpEntry.action_idx = this._trajRound.my_play ? this._trajRound.my_play.action_idx : -1;
+            // 更新 my_play 的 penalty/row_affected
+            if (this._trajRound.my_play) {
+              this._trajRound.my_play.penalty = cpEntry.penalty;
+              if (this._trajRound.my_play.row_affected === -1) {
+                this._trajRound.my_play.row_affected = cpEntry.row_affected;
+              }
+            }
+          }
+          this._trajRound.plays.push(cpEntry);
+        }
+        // ------------------------------------
         this._enqueueCardPlaced(msg);
         break;
 
@@ -647,6 +746,30 @@ Page({
       case "round_end":
         (function(m) {
           self._afterCardPlaced(function() {
+            // ---- 轨迹：归档本轮 ----
+            if (self._traj && self._trajRound) {
+              self._trajRound.scores_after = m.scores || {};
+              // 用 my_play 作为 plays 里我方记录（已含 hand_before/action_idx）
+              var myPlay = self._trajRound.my_play;
+              if (myPlay) {
+                var found = false;
+                for (var ri = 0; ri < self._trajRound.plays.length; ri++) {
+                  if (self._trajRound.plays[ri].player_id === myPlay.player_id) {
+                    self._trajRound.plays[ri].hand_before = myPlay.hand_before;
+                    self._trajRound.plays[ri].action_idx  = myPlay.action_idx;
+                    found = true; break;
+                  }
+                }
+                if (!found) self._trajRound.plays.unshift(myPlay);
+              }
+              self._traj.rounds.push({
+                round: self._trajRound.round,
+                plays: self._trajRound.plays,
+                scores_after: self._trajRound.scores_after
+              });
+              self._trajRound = null;
+            }
+            // -----------------------
             self._state.round = m.round;
             self._state.rows = m.rows || [];
             self._state.scores = m.scores || self._state.scores;
@@ -702,6 +825,23 @@ Page({
               if (self._state.logs.length > 60) self._state.logs = self._state.logs.slice(0, 60);
             }
             self._addLog("🏆 游戏结束！", "system");
+
+            // ---- 轨迹：补充终局信息并上报 ----
+            if (self._traj) {
+              try {
+                self._traj.final_scores = m.scores || self._state.scores;
+                // ranking: [{name, score, isYou}, ...] → 转为 player_id 列表
+                self._traj.ranking = (m.ranking || []).map(function(r) {
+                  return { name: r.name, score: r.score, isYou: !!r.isYou };
+                });
+                self._uploadTraj(self._traj);
+              } catch(e) {
+                console.log("[Traj] finalize error (ignored):", e);
+              }
+              self._traj = null;
+            }
+            // ------------------------------------
+
             self._showEndModal(m.ranking || []);
           });
         })(msg);
